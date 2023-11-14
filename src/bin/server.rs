@@ -4,6 +4,14 @@ use std::time::Duration;
 use sysinfo::{System, SystemExt};
 use std::{process, str, thread};
 use serde::{Deserialize, Serialize};
+use steganography::encoder::*;
+use steganography::decoder::*;
+use steganography::util::*;
+use std::fs::File;
+use std::io::{Read, Write};
+use image::{DynamicImage, ImageBuffer, Rgba};
+use image::GenericImageView;
+use base64::{encode, decode};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ServerInfo {
@@ -123,7 +131,7 @@ fn main() {
         .expect("didn't specify which port")
         .parse()
         .unwrap();
-
+    
     let server_1 = "127.0.0.1";
     let server_2 = "127.0.0.2";
     let server_3 = "127.0.0.3";
@@ -182,14 +190,16 @@ fn main() {
     let socket3 = create_socket(server_ip, ports[2]); // server listen from client
     let socket4 = create_socket(server_ip, ports[3]); // server send to client
 
-    // send from server to another server
-    thread::sleep(Duration::from_secs(3));
-
-    let mut buffer = [0; 16384];
+    let mut buffer = [0; 65535];
     let mut leader: u16;
     let mut message_counter = 1;
     let mut election_starter = 1;
     let mut die_message_counter = 0;
+
+    let default_image = file_as_dynamic_image("/home/omar/Desktop/proj/default.jpg".to_string());
+
+    // send from server to another server
+    thread::sleep(Duration::from_secs(3));
     loop {
         println!("----- MESSAGE NUMBER: {} ------", message_counter);
         // println!("Memory usage: {}", mem_usage);
@@ -211,17 +221,28 @@ fn main() {
         let mut msg = str::from_utf8(&buffer[..amt]).unwrap();
         println!("Received: {} from {}", msg, src);
         let mut src_client = src.to_string();
-        //remove the message from the buffer
-        buffer = [0; 16384];
+        
+        // encode the recieved picture into the default picture
+        let msg_bytes = msg.as_bytes();
+        let enc = Encoder::new(msg_bytes, default_image.clone());
+        let result = enc.encode_alpha();
+        save_image_buffer(result, "hidden_message.png".to_string());
 
-        // play with the message here
 
         // send from server to client
         if server_num == leader {
+
+            // convert the result to base64
+            let mut payload = File::open("hidden_message.png").unwrap();
+            let mut payload_bytes = Vec::new();
+            payload.read_to_end(&mut payload_bytes).unwrap();
+            let bytes = payload_bytes.as_slice();
+            
+
             src_client = src_client.split(":").collect::<Vec<&str>>()[0].to_string();
             let temp = format!("{}:{}", src_client, ports[3]);
             socket4
-                .send_to("Hello client".as_bytes(), &temp)
+                .send_to(bytes, &temp)
                 .expect("Failed to send data to client");
             println!(
                 "server {} sent to client with address {}",
@@ -257,268 +278,3 @@ fn main() {
         message_counter +=1;
     }
 }
-
-
-
-
-
-// 
-// fn main() {
-    // let port1: u16 = std::env::args()
-        // .nth(1)
-        // .expect("no port number provided")
-        // .parse()
-        // .unwrap();
-    // let port2: u16 = std::env::args()
-        // .nth(2)
-        // .expect("no other port number provided")
-        // .parse()
-        // .unwrap();
-    // let port3: u16 = std::env::args()
-        // .nth(3)
-        // .expect("no other port number provided")
-        // .parse()
-        // .unwrap();
-    // let port: u16 = std::env::args()
-        // .nth(4)
-        // .expect("didn't specify which port")
-        // .parse()
-        // .unwrap();
-// 
-    // let ports = vec![port1, port2, port3];
-// 
-//     Create a socket for the server.
-//     // let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).unwrap();
-// // 
-//     to allow multiple instances to bind to the same port.
-//     // socket.set_reuse_address(true).unwrap();
-// // 
-//     // let addr = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), ports[port as usize - 1]);
-//     // socket.bind(&SockAddr::from(addr)).unwrap();
-// // 
-//     // socket
-//         // .join_multicast_v4(&Ipv4Addr::new(239, 0, 0, 1), &Ipv4Addr::new(0, 0, 0, 0))
-//         // .unwrap();
-// // 
-//     Convert the socket back to a UdpSocket.
-//     // let socket = UdpSocket::from(socket);
-// // 
-//     // let pid = process::id();
-// // 
-//     get the memory usage per server
-    // let mut system = System::new_all();
-    // system.refresh_all();
-// 
-    // let mut mem_usage:f32;
-// 
-    // if port == 1{
-    //     let total_mem1 = system.total_memory();
-    //     let mem1 = system.used_memory();
-    //     mem_usage = mem1 as f32 / total_mem1 as f32;
-    //     // mem_usage = 1.0;
-    // // } else if port == 2{
-    //     let total_mem2 = system.total_memory();
-    //     let mem2 = system.used_memory();
-    //     mem_usage = mem2 as f32 / total_mem2 as f32;
-    //     // mem_usage = 3.0;
-    // // } else if port == 3{
-    //     let total_mem3 = system.total_memory();
-    //     let mem3 = system.used_memory();
-    //     mem_usage = mem3 as f32 / total_mem3 as f32;
-        // mem_usage = 2.5;
-    // } else{
-        // mem_usage = 0.0;
-    // }
-    // println!("mem usage: {} for port: {}", mem_usage, port);
-// 
-    // let server1 = format!("127.0.0.1:{}", port1);
-    // let server2 = format!("127.0.0.1:{}", port2);
-    // let server3 = format!("127.0.0.1:{}", port3);
-// 
-    // to store the incoming messages.
-    // let mut buffer = [0; 1024];
-    // let mut is_leader = true;
-    // let mut winner: u16;
-    // let mut delay_flag = false;
-    // 
-    // now listen to client and respond if you are the leader
-    // loop {
-        // let (amt, src) = socket.recv_from(&mut client_buffer).expect("Didn't receive data");
-        // let msg = str::from_utf8(&client_buffer[..amt]).unwrap();
-        // println!("Received: {} from {}", msg, src);
-// 
-        // winner = election(delay_flag, port1, port2, port3, port, ports.clone(), mem_usage, &socket, server1.clone(), server2.clone(), server3.clone(), pid, buffer, &is_leader);
-        // println!("Value of is_leader: {} at port: {}", is_leader, port);
-        // if (delay_flag == false){
-            // delay_flag = true;
-        // }
-// 
-        // if port == winner {
-            // let response = format!(
-                // "{}: response from server listening on port {} with PID: {}",
-                // msg, port, pid
-            // );
-            // socket
-                // .send_to(response.as_bytes(), &src)
-                // .expect("failed to send response");
-            // mem_usage += 3.0;
-        // }
-// 
-        // empty the buffer
-        // buffer = [0; 1024];
-    // }
-// 
-// }
-// 
-// fn election(
-    // delay_flag: bool,
-    // port1: u16,
-    // port2: u16,
-    // port3: u16, 
-    // port: u16, 
-    // ports: Vec<u16>, 
-    // mut mem_usage:f32, 
-    // mut socket: &UdpSocket, 
-    // server1: String, 
-    // server2: String, 
-    // server3: String, 
-    // pid: u32, 
-    // mut buffer: [u8; 1024],
-    // mut is_leader: &bool,
-// ) -> u16{
-// 
-    // let servers = vec![server1, server2, server3];
-// 
-    // let server_info = ServerInfo {
-        // port: port,
-        // mem_usage: mem_usage,
-    // };
-// 
-    // let server_info_str = serde_json::to_string(&server_info).unwrap();
-// 
-    // Initially, each server assumes it's the leader.
-    // println!(
-        // "the server listening on port {} has set itself as the leader",
-        // ports[port as usize - 1]
-    // );
-// 
-    // if(delay_flag == false){
-        // thread::sleep(Duration::from_secs(3));
-    // }
-// 
-    // if port == 1 {
-    //     sent port number to server listening on port two to check who is listening on a lower port
-    //     // socket
-    //         // .send_to(server_info_str.as_bytes(), &servers[2 - 1])
-    //         // .expect("Failed to send initial leader claim");
-    // // } else if port == 2 {
-    //     receive port number from server listening on port 1, then compare who has the lower port and send the result to port 3
-    //     // let (amt, src) = socket.recv_from(&mut buffer).expect("Didn't receive data");
-    //     // let mut msg: &str;
-    //     i want to receive from the server, not the client
-    //     if(src.to_string() != servers[0]){
-    //         println!("This is from a client: {}", src);
-            //write to buffer client
-            // msg = str::from_utf8(&buffer[..amt]).unwrap();
-            // remove from buffer and add to client buffer
-            // client_buffer = buffer;
-            // buffer = &[0; 1024];
-        // }else{
-            // msg = str::from_utf8(&buffer[..amt]).unwrap();
-            // println!("Received: {} from {}", msg, src);
-        // 
-        // let port1_claim_info: ServerInfo = serde_json::from_str(msg).unwrap();
-        // let port1_claim = port1_claim_info.mem_usage;
-        // println!("port1 claim: {}", port1_claim);
-        // if port1_claim <= mem_usage {
-            // socket
-                // .send_to(msg.to_string().as_bytes(), &servers[3 - 1])
-                // .expect("Failed to send initial leader claim");
-            // println!("sent {} to server listening on port {}", msg, port3);
-            // is_leader = &false;
-        // } else {
-            // socket
-                // .send_to(server_info_str.as_bytes(), &servers[3 - 1])
-                // .expect("Failed to send initial leader claim");
-            // println!("sent {} to server listening on port {}", server_info_str, port3);
-        // }
-    // } else if port == 3 {
-        // receive port number from server listening on port 2, then compare who has the lower port and send the result to the two other servers
-        // // let (amt, src) = socket.recv_from(&mut buffer).expect("Didn't receive data");
-        // // let mut msg: &str;
-        // if(src.to_string() != servers[1]){
-        //     println!("This is from a client: {}", src);
-        //     write to buffer client
-        //     msg = str::from_utf8(&buffer[..amt]).unwrap();
-        //     remove from buffer and add to client buffer
-        //     client_buffer = buffer;
-        //     buffer = &[0; 1024];
-        // }else{
-            // msg = str::from_utf8(&buffer[..amt]).unwrap();
-            // println!("Received: {} from {}", msg, src);
-        // 
-        // let port2_claim_info: ServerInfo = serde_json::from_str(msg).unwrap();
-        // let port2_claim = port2_claim_info.mem_usage;
-        // println!("port2 claim: {}", port2_claim);
-        // if port2_claim <= mem_usage {
-            // socket
-                // .send_to(msg.to_string().as_bytes(), &servers[1 - 1])
-                // .expect("Failed to send initial leader claim");
-            // socket
-                // .send_to(msg.to_string().as_bytes(), &servers[2 - 1])
-                // .expect("Failed to send initial leader claim");
-            // is_leader = &false;
-            // println!("sent {} to server listening on port {}", msg, port1);
-            // println!("sent {} to server listening on port {}", msg, port2);
-            // return port2_claim_info.port;
-        // } else {
-            // socket
-                // .send_to(server_info_str.as_bytes(), &servers[1 - 1])
-                // .expect("Failed to send initial leader claim");
-            // socket
-                // .send_to(server_info_str.as_bytes(), &servers[2 - 1])
-                // .expect("Failed to send initial leader claim");
-            // println!("sent {} to server listening on port {}", server_info_str, port1);
-            // println!("sent {} to server listening on port {}", server_info_str, port2);
-            // return port;
-        // }
-    // 
-    // }
-// 
-    // by now, all three servers know which server is listening to the lowest port.
-    // server 2 and 3 will receive the message from the server listening on port 3 to know who the leader is.
-    // if port == 1 || port == 2 {
-        // let (amt, src) = socket.recv_from(&mut buffer).expect("Didn't receive data");
-        // let mut msg: &str;
-        // if(src.to_string() != servers[2]){
-            // println!("This is from a client: {}", src);
-            //write to buffer client
-            // msg = str::from_utf8(&buffer[..amt]).unwrap();
-            // remove from buffer and add to client buffer
-            // client_buffer = buffer;
-            // buffer = &[0; 1024];
-        // }else{
-            // msg = str::from_utf8(&buffer[..amt]).unwrap();
-            // println!("Received: {} from {}", msg, src);
-        // 
-        // println!("I RECIEVED THIS: {} from {}", msg, src);
-        // let winner_info: ServerInfo = serde_json::from_str(msg).unwrap();
-        // let winner = winner_info.port;
-        // println!("winner: {}", winner);
-        // if winner == port {
-            // println!(
-                // "server {} has won, it is now the actual leader",
-                // servers[port as usize - 1]
-            // );
-        // } else {    
-            // is_leader = &false;
-            // println!(
-                // "server {} has set {} as the leader",
-                // servers[port as usize - 1], winner
-            // );
-        // }
-        // return winner;
-    // }
-    // return 0;
-// }
-// 
