@@ -221,16 +221,15 @@ fn main() {
         let mut msg = str::from_utf8(&buffer[..amt]).unwrap();
         println!("Received: {} from {}", msg, src);
         let mut src_client = src.to_string();
-        
-        // encode the recieved picture into the default picture
-        let msg_bytes = msg.as_bytes();
-        let enc = Encoder::new(msg_bytes, default_image.clone());
-        let result = enc.encode_alpha();
-        save_image_buffer(result, "hidden_message.png".to_string());
-
 
         // send from server to client
         if server_num == leader {
+
+            // encode the recieved picture into the default picture
+            let msg_bytes = msg.as_bytes();
+            let enc = Encoder::new(msg_bytes, default_image.clone());
+            let result = enc.encode_alpha();
+            save_image_buffer(result, "hidden_message.png".to_string());
 
             // convert the result to base64
             let mut payload = File::open("hidden_message.png").unwrap();
