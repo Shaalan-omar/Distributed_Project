@@ -1,17 +1,16 @@
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket, SocketAddr, IpAddr};
-use std::time::Duration;
-use sysinfo::{System, SystemExt};
-use std::{process, str, thread};
+use base64::{decode, encode};
+use image::GenericImageView;
+use image::{DynamicImage, ImageBuffer, Rgba};
 use serde::{Deserialize, Serialize};
-use steganography::encoder::*;
-use steganography::decoder::*;
-use steganography::util::*;
 use std::fs::File;
 use std::io::{Read, Write};
-use image::{DynamicImage, ImageBuffer, Rgba};
-use image::GenericImageView;
-use base64::{encode, decode};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::time::Duration;
+use std::{process, str, thread};
+use steganography::decoder::*;
+use steganography::encoder::*;
+use steganography::util::*;
+use sysinfo::{System, SystemExt};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ServerInfo {
@@ -21,7 +20,9 @@ struct ServerInfo {
 
 fn create_socket(server_ip: &str, port: u16) -> UdpSocket {
     let server_address = format!("{}:{}", server_ip, port);
-    let socket_addr: SocketAddr = server_address.parse().expect("Failed to parse socket address");
+    let socket_addr: SocketAddr = server_address
+        .parse()
+        .expect("Failed to parse socket address");
     UdpSocket::bind(socket_addr).expect("Failed to bind socket")
 }
 
@@ -131,7 +132,7 @@ fn main() {
         .expect("didn't specify which port")
         .parse()
         .unwrap();
-    
+
     let server_1 = "127.0.0.1";
     let server_2 = "127.0.0.2";
     let server_3 = "127.0.0.3";
@@ -196,7 +197,7 @@ fn main() {
     let mut election_starter = 1;
     let mut die_message_counter = 0;
 
-    let default_image = file_as_dynamic_image("/home/omar/Desktop/proj/default.jpg".to_string());
+    let default_image = file_as_dynamic_image("default.png".to_string());
 
     // send from server to another server
     thread::sleep(Duration::from_secs(3));
@@ -205,7 +206,13 @@ fn main() {
         // println!("Memory usage: {}", mem_usage);
         // println!("STARTED ELECTION");
         leader = election_logic(
-            server_num, mem_usage, election_starter, &servers, &ports, &socket1, &socket2,
+            server_num,
+            mem_usage,
+            election_starter,
+            &servers,
+            &ports,
+            &socket1,
+            &socket2,
         );
         // println!("FINISHED ELECTION");
         // println!("leader: {}", leader);
@@ -216,17 +223,42 @@ fn main() {
             println!("** SERVER {} IS THE LEADER **", server_num);
         }
 
-        //all servers listen from client
-        let (amt, src) = socket3.recv_from(&mut buffer).expect("Didn't receive data");
-        let mut msg = str::from_utf8(&buffer[..amt]).unwrap();
-        println!("Received: {} from {}", msg, src);
-        let mut src_client = src.to_string();
+        // //all servers listen from client
+        // let (amt, src) = socket3.recv_from(&mut buffer).expect("Didn't receive data");
+        // let mut msg = str::from_utf8(&buffer[..amt]).unwrap();
+        // println!("Received: {} from {}", msg, src);
+        let mut src_client;
+
+        // vector of bytes to store the image
+        let mut recieved_image_bytes: Vec<u8> = Vec::new();
+        // loop to recieve all chunks of the image from the client
+        loop {
+            let (amt, src) = socket3.recv_from(&mut buffer).expect("Didn't receive data");
+            let mut msg = str::from_utf8(&buffer[..amt]).unwrap();
+            if msg == "end" {
+                src_client = src.to_string();
+                break;
+            }
+            let msg_bytes = msg.as_bytes();
+            recieved_image_bytes.append(&mut msg_bytes.to_vec());
+        }
 
         // send from server to client
         if server_num == leader {
+            // reconstruct the image from the fragments
+            let mut reconstructed_image_bytes = Vec::new();
+            for j in 0..recieved_image_bytes.len() {
+                reconstructed_image_bytes.push(recieved_image_bytes[j]);
+            }
+
+            let decoded_image = base64::decode(reconstructed_image_bytes).unwrap();
+            let path = format!("decoded_image_message{}.png", message_counter);
+            let mut file = File::create(path).unwrap();
+            file.write_all(&decoded_image);
 
             // encode the recieved picture into the default picture
-            let msg_bytes = msg.as_bytes();
+            // let msg_bytes = msg.as_bytes();
+            let msg_bytes = recieved_image_bytes.as_slice();
             let enc = Encoder::new(msg_bytes, default_image.clone());
             let result = enc.encode_alpha();
             save_image_buffer(result, "hidden_message.png".to_string());
@@ -236,15 +268,40 @@ fn main() {
             let mut payload_bytes = Vec::new();
             payload.read_to_end(&mut payload_bytes).unwrap();
             let bytes = payload_bytes.as_slice();
-            
 
             src_client = src_client.split(":").collect::<Vec<&str>>()[0].to_string();
             let temp = format!("{}:{}", src_client, ports[3]);
+
+            // fragment the encrypted image
+            let mut encrypted_image = File::open("hidden_message.png").unwrap();
+            let mut encrypted_image_bytes = Vec::new();
+            encrypted_image
+                .read_to_end(&mut encrypted_image_bytes)
+                .unwrap();
+
+            let encrypted_image_base64 = encode(encrypted_image_bytes);
+            let encrypted_image_base64_bytes = encrypted_image_base64.as_bytes();
+
+            let mut encrypted_image_bytes_vec = Vec::new();
+            for chunk in encrypted_image_base64_bytes.chunks(16383) {
+                encrypted_image_bytes_vec.push(chunk);
+            }
+            println!(
+                "Length of encrypted image bytes vec: {}",
+                encrypted_image_bytes_vec.len()
+            );
+            // send the encrypted image to the client
+            for i in 0..encrypted_image_bytes_vec.len() {
+                socket4
+                    .send_to(encrypted_image_bytes_vec[i], &temp)
+                    .expect("Failed to send data to client");
+                println!("Sent chunk {}", i);
+            }
             socket4
-                .send_to(bytes, &temp)
+                .send_to(b"end", &temp)
                 .expect("Failed to send data to client");
             println!(
-                "server {} sent to client with address {}",
+                "Server {} sent the encrypted image to the client {}",
                 server_num, src_client
             );
         }
@@ -252,9 +309,11 @@ fn main() {
         election_starter = leader;
 
         // revive the dead server by decreasing the memory usage of the dead server by 1000 after 3 messages
-        if(mem_usage >= 1000.0){
-            let flag:bool = (message_counter != die_message_counter + 1) && (message_counter != die_message_counter + 2) && (message_counter != die_message_counter + 3);
-            if (message_counter % 4 == 0) && (message_counter != 0) && flag{
+        if (mem_usage >= 1000.0) {
+            let flag: bool = (message_counter != die_message_counter + 1)
+                && (message_counter != die_message_counter + 2)
+                && (message_counter != die_message_counter + 3);
+            if (message_counter % 4 == 0) && (message_counter != 0) && flag {
                 println!("----- RELOADING THIS SERVER -----");
                 // change the memory usage of a random server
                 mem_usage -= 1000.0;
@@ -262,8 +321,8 @@ fn main() {
         }
 
         // simulate fault tolerance by increasing the memory usage of the leader server by 1000
-        if(server_num == leader){
-            if (message_counter % 5 == 0) && (message_counter != 0){
+        if (server_num == leader) {
+            if (message_counter % 5 == 0) && (message_counter != 0) {
                 println!("----- DROPPING THIS SERVER -----");
                 // change the memory usage of a random server
                 mem_usage += 1000.0;
@@ -271,9 +330,10 @@ fn main() {
             }
         }
 
-        if (message_counter == 1){
+        if (message_counter == 1) {
             thread::sleep(Duration::from_secs(1));
         }
-        message_counter +=1;
+        message_counter += 1;
+        println!("IM HERE")
     }
 }
