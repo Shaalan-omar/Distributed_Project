@@ -25,8 +25,8 @@ fn main() {
         .parse()
         .unwrap();
 
-    let client_1 = "127.0.0.4";
-    let client_2 = "127.0.0.5";
+    let client_1 = "10.40.45.15";
+    let client_2 = "10.40.54.147";
     let client_3 = "127.0.0.6";
 
     let clients = vec![client_1, client_2, client_3];
