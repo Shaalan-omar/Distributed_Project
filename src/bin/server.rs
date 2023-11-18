@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{process, str, thread};
 use steganography::decoder::*;
@@ -192,13 +194,56 @@ fn main() {
     let socket3 = create_socket(server_ip, ports[2]); // server listen from client
     let socket4 = create_socket(server_ip, ports[3]); // server send to client
 
-    let mut buffer = [0; 65535];
+    let client_data: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    // create a channel to communicate between the receiving thread and the main thread
+    let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
+
+    // spawn the thread that will receive image data from clients
+    let data_arc = Arc::clone(&client_data);
+    let tx_clone = mpsc::Sender::clone(&tx);
+    let rec_socket = socket3.try_clone().unwrap();
+
+    /////////////////////////////////////////////////////////////////
+    /// thread to receive image data from clients
+    thread::spawn(move || {
+        let mut buffer = [0; 65535];
+        let mut src_client;
+        loop {
+            // recieve a fragment from any client
+            let (amt, src) = rec_socket
+                .recv_from(&mut buffer)
+                .expect("Didn't receive data");
+            let recieved_chunk = &buffer[..amt];
+            let sending_client = src.to_string();
+
+            // add the fragment to the hashmap if client already sent, else create a new entry
+            if data_arc.lock().unwrap().contains_key(&sending_client) {
+                let mut x = data_arc.lock().unwrap();
+                let mut temp = x.get_mut(&sending_client).unwrap();
+                temp.append(&mut recieved_chunk.to_vec());
+            } else {
+                data_arc
+                    .lock()
+                    .unwrap()
+                    .insert(sending_client, recieved_chunk.to_vec());
+            }
+
+            if recieved_chunk == b"MINSENDEND" {
+                println!("Finished receiving image from client: {}", src.to_string());
+                src_client = src.to_string();
+                tx_clone.send(src_client).unwrap();
+            }
+        }
+    });
+    /////////////////////////////////////////////////////////////////
+    // let mut buffer = [0; 65535];
     let mut leader: u16;
     let mut message_counter = 1;
     let mut election_starter = 1;
     let mut die_message_counter = 0;
 
-    let mut client_data: HashMap<String, Vec<u8>> = HashMap::new();
+    // let mut client_data: HashMap<String, Vec<u8>> = HashMap::new(); // will be mutex
 
     let default_image = file_as_dynamic_image("default.png".to_string());
 
@@ -224,39 +269,46 @@ fn main() {
         }
 
         // all servers listen from client
-        let mut src_client;
+        // let mut src_client;
 
         // loop to recieve all chunks of the image from the client
-        loop {
-            // recieve a fragment from any client
-            let (amt, src) = socket3.recv_from(&mut buffer).expect("Didn't receive data");
-            let recieved_chunk = &buffer[..amt];
-            let sending_client = src.to_string();
+        // loop {
+        //     // recieve a fragment from any client
+        //     let (amt, src) = socket3.recv_from(&mut buffer).expect("Didn't receive data");
+        //     let recieved_chunk = &buffer[..amt];
+        //     let sending_client = src.to_string();
 
-            //check this isnt the end of the message
-            if recieved_chunk == b"MINSENDEND" {
-                println!("Finished recieving image from client: {}", src.to_string());
-                src_client = src.to_string();
-                break;
-            }
+        //     //check this isnt the end of the message
+        //     if recieved_chunk == b"MINSENDEND" {
+        //         println!("Finished recieving image from client: {}", src.to_string());
+        //         src_client = src.to_string();
+        //         break;
+        //     }
 
-            // add the fragment to the hashmap if client already sent, else create a new entry
-            if client_data.contains_key(&sending_client) {
-                let mut temp = client_data.get_mut(&sending_client).unwrap();
-                temp.append(&mut recieved_chunk.to_vec());
-            } else {
-                client_data.insert(sending_client, recieved_chunk.to_vec());
-            }
-        }
+        //     // add the fragment to the hashmap if client already sent, else create a new entry
+        //     if client_data.contains_key(&sending_client) {
+        //         let mut temp = client_data.get_mut(&sending_client).unwrap();
+        //         temp.append(&mut recieved_chunk.to_vec());
+        //     } else {
+        //         client_data.insert(sending_client, recieved_chunk.to_vec());
+        //     }
+        // }
 
         //vector of bytes to store the image
+        let mut src_client = rx.recv().unwrap();
         let mut image_from_client: Vec<u8> = Vec::new();
 
         //get the image from the hashmap with the client as the key using the get method
-        image_from_client = client_data.get(&src_client).unwrap().to_vec();
-
+        // image_from_client = client_data.get(&src_client).unwrap().to_vec();
+        image_from_client = client_data
+            .lock()
+            .unwrap()
+            .get(&src_client)
+            .unwrap()
+            .to_vec();
         //remove it from the hashmap
-        client_data.remove(&src_client);
+        // client_data.remove(&src_client);
+        client_data.lock().unwrap().remove(&src_client);
 
         // reconstruct the image from the fragments
         let mut reconstructed_image_bytes = Vec::new();
@@ -337,9 +389,5 @@ fn main() {
         message_counter += 1;
         println!("IM HERE");
         // print the contents of the map
-        println!("The size of the map is {}", client_data.len());
-        for (key, value) in &client_data {
-            println!("{}: {}", key, value.len());
-        }
     }
 }
