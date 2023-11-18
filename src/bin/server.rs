@@ -230,80 +230,105 @@ fn main() {
         let mut src_client;
 
         // vector of bytes to store the image
-        let mut recieved_image_bytes: Vec<u8> = Vec::new();
+        let mut image_from_client: Vec<u8> = Vec::new();
         // loop to recieve all chunks of the image from the client
+        let mut harbinger = 0;
         loop {
             let (amt, src) = socket3.recv_from(&mut buffer).expect("Didn't receive data");
-            let mut msg = str::from_utf8(&buffer[..amt]).unwrap();
-            if msg == "end" {
+            let recieved_chunk = &buffer[..amt];
+            // println!("Amt: {}", amt);
+            if recieved_chunk == b"MINSENDEND" {
+                println!("Finished recieving image from client: {}", src.to_string());
                 src_client = src.to_string();
                 break;
             }
-            let msg_bytes = msg.as_bytes();
-            recieved_image_bytes.append(&mut msg_bytes.to_vec());
+            image_from_client.append(&mut recieved_chunk.to_vec());
+            // println!("Harbinger: {}", harbinger);
+            harbinger += 1;
         }
+
+        // reconstruct the image from the fragments
+        let mut reconstructed_image_bytes = Vec::new();
+        for j in 0..image_from_client.len() {
+            reconstructed_image_bytes.push(image_from_client[j]);
+        }
+        // let decoded_image = base64::decode(reconstructed_image_bytes).unwrap();
+        let path = format!("decoded_image_message{}.png", message_counter);
+        let mut file = File::create(path).unwrap();
+        file.write_all(&reconstructed_image_bytes);
 
         // send from server to client
         if server_num == leader {
-            // reconstruct the image from the fragments
-            let mut reconstructed_image_bytes = Vec::new();
-            for j in 0..recieved_image_bytes.len() {
-                reconstructed_image_bytes.push(recieved_image_bytes[j]);
-            }
-
-            let decoded_image = base64::decode(reconstructed_image_bytes).unwrap();
-            let path = format!("decoded_image_message{}.png", message_counter);
-            let mut file = File::create(path).unwrap();
-            file.write_all(&decoded_image);
-
             // encode the recieved picture into the default picture
-            // let msg_bytes = msg.as_bytes();
-            let msg_bytes = recieved_image_bytes.as_slice();
-            let enc = Encoder::new(msg_bytes, default_image.clone());
+            let msg_bytes = &reconstructed_image_bytes.as_slice();
+            let msg_bytes_base64 = base64::encode(msg_bytes);
+            let bytes_to_send = msg_bytes_base64.as_bytes();
+            let enc = Encoder::new(bytes_to_send, default_image.clone());
             let result = enc.encode_alpha();
             save_image_buffer(result, "hidden_message.png".to_string());
 
-            // convert the result to base64
+            // // convert the result to base64
             let mut payload = File::open("hidden_message.png").unwrap();
             let mut payload_bytes = Vec::new();
             payload.read_to_end(&mut payload_bytes).unwrap();
-            let bytes = payload_bytes.as_slice();
+            // let bytes = payload_bytes.as_slice();
+
+            let mut fragmented_payload = Vec::new();
+            for chunk in payload_bytes.chunks(1024) {
+                fragmented_payload.push(chunk);
+            }
+
+            // println!("Length of fragmented payload: {}", fragmented_payload.len());
 
             src_client = src_client.split(":").collect::<Vec<&str>>()[0].to_string();
             let temp = format!("{}:{}", src_client, ports[3]);
 
-            // fragment the encrypted image
-            let mut encrypted_image = File::open("hidden_message.png").unwrap();
-            let mut encrypted_image_bytes = Vec::new();
-            encrypted_image
-                .read_to_end(&mut encrypted_image_bytes)
-                .unwrap();
-
-            let encrypted_image_base64 = encode(encrypted_image_bytes);
-            let encrypted_image_base64_bytes = encrypted_image_base64.as_bytes();
-
-            let mut encrypted_image_bytes_vec = Vec::new();
-            for chunk in encrypted_image_base64_bytes.chunks(16383) {
-                encrypted_image_bytes_vec.push(chunk);
-            }
-            println!(
-                "Length of encrypted image bytes vec: {}",
-                encrypted_image_bytes_vec.len()
-            );
-            // send the encrypted image to the client
-            for i in 0..encrypted_image_bytes_vec.len() {
+            for j in 0..fragmented_payload.len() {
                 socket4
-                    .send_to(encrypted_image_bytes_vec[i], &temp)
+                    .send_to(fragmented_payload[j], &temp)
                     .expect("Failed to send data to client");
-                println!("Sent chunk {}", i);
+                // println!("Sent chunk {}", j);
+
+                if j % 20 == 0 && j != 0 {
+                    thread::sleep(Duration::from_millis(10));
+                }
             }
             socket4
-                .send_to(b"end", &temp)
+                .send_to(b"MINSENDEND", &temp)
                 .expect("Failed to send data to client");
-            println!(
-                "Server {} sent the encrypted image to the client {}",
-                server_num, src_client
-            );
+
+            // fragment the encrypted image
+            // let mut encrypted_image = File::open("hidden_message.png").unwrap();
+            // let mut encrypted_image_bytes = Vec::new();
+            // encrypted_image
+            //     .read_to_end(&mut encrypted_image_bytes)
+            //     .unwrap();
+
+            // let encrypted_image_base64 = encode(encrypted_image_bytes);
+            // let encrypted_image_base64_bytes = encrypted_image_base64.as_bytes();
+
+            // let mut encrypted_image_bytes_vec = Vec::new();
+            // for chunk in encrypted_image_base64_bytes.chunks(16383) {
+            //     encrypted_image_bytes_vec.push(chunk);
+            // }
+            // println!(
+            //     "Length of encrypted image bytes vec: {}",
+            //     encrypted_image_bytes_vec.len()
+            // );
+            // // send the encrypted image to the client
+            // for i in 0..encrypted_image_bytes_vec.len() {
+            //     socket4
+            //         .send_to(encrypted_image_bytes_vec[i], &temp)
+            //         .expect("Failed to send data to client");
+            //     println!("Sent chunk {}", i);
+            // }
+            // socket4
+            //     .send_to(b"end", &temp)
+            //     .expect("Failed to send data to client");
+            // println!(
+            //     "Server {} sent the encrypted image to the client {}",
+            //     server_num, src_client
+            // );
         }
 
         election_starter = leader;

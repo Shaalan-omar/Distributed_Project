@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 use std::{process, str, thread};
 use steganography::decoder::*;
@@ -62,89 +63,95 @@ fn main() {
     let mut payload = File::open("big.png").unwrap();
     let mut payload_bytes = Vec::new();
     payload.read_to_end(&mut payload_bytes).unwrap();
-    let payload_image_base64 = base64::encode(payload_bytes);
-    let payload_image_base64_bytes = payload_image_base64.as_bytes();
+    // let payload_image_base64 = base64::encode(payload_bytes);
+    // let payload_image_base64_bytes = payload_image_base64.as_bytes();
 
-    // fragment the image into parts of 4096 bytes
-    let mut payload_image_base64_bytes_vec = Vec::new();
-    for chunk in payload_image_base64_bytes.chunks(32768) {
-        payload_image_base64_bytes_vec.push(chunk);
+    // fragment the image into bytes
+    let mut fragmented_image_bytes = Vec::new();
+    for chunk in payload_bytes.chunks(1024) {
+        fragmented_image_bytes.push(chunk);
     }
 
-    println!("Sending {} chunks", payload_image_base64_bytes_vec.len());
+    println!("The size of the image is {}", fragmented_image_bytes.len());
 
-    for i in 1..2 {
-        for j in 0..payload_image_base64_bytes_vec.len() {
+    // // REASSEMBLY PART
+    // let mut recieved_image_bytes: Vec<u8> = Vec::new();
+    // for x in payload_image_base64_bytes_vec {
+    //     recieved_image_bytes.append(&mut x.to_vec());
+    // }
+    // let mut file = File::create("received_client.png").unwrap();
+    // file.write_all(&recieved_image_bytes);
+
+    // println!("Sending {} chunks", payload_image_base64_bytes_vec.len());
+
+    for i in 1..3 {
+        for j in 0..fragmented_image_bytes.len() {
             // send to server1
             sending_socket
-                .send_to(payload_image_base64_bytes_vec[j], &server_1_socket)
+                .send_to(fragmented_image_bytes[j], &server_1_socket)
                 .expect("Failed to send data to server");
             // send to server2
             sending_socket
-                .send_to(payload_image_base64_bytes_vec[j], &server_2_socket)
+                .send_to(fragmented_image_bytes[j], &server_2_socket)
                 .expect("Failed to send data to server");
             // send to server3
             sending_socket
-                .send_to(payload_image_base64_bytes_vec[j], &server_3_socket)
+                .send_to(fragmented_image_bytes[j], &server_3_socket)
                 .expect("Failed to send data to server");
+            // println!("Sent chunk {} to all servers", j);
+            if j % 20 == 0 && j != 0 {
+                // sleep for 1 second
+                thread::sleep(Duration::from_millis(10));
+            }
         }
         println!("Sent iteration {} to all servers", i);
         sending_socket
-            .send_to(b"end", &server_1_socket)
+            .send_to(b"MINSENDEND", &server_1_socket)
             .expect("Failed to send data to server");
         sending_socket
-            .send_to(b"end", &server_2_socket)
+            .send_to(b"MINSENDEND", &server_2_socket)
             .expect("Failed to send data to server");
         sending_socket
-            .send_to(b"end", &server_3_socket)
+            .send_to(b"MINSENDEND", &server_3_socket)
             .expect("Failed to send data to server");
         println!("Sent end to all servers");
 
         // // await responses from the leading server
         let mut buffer = [0; 65535];
         let mut src_server;
-        // let (amt, src) = recieving_socket
-        //     .recv_from(&mut buffer)
-        //     .expect("Didn't receive data");
 
-        // create the vector of bytes to be decoded
-        let mut recieved_image_bytes: Vec<u8> = Vec::new();
+        let mut image_from_server: Vec<u8> = Vec::new();
         loop {
             let (amt, src) = recieving_socket
                 .recv_from(&mut buffer)
                 .expect("Didn't receive data");
-            let mut msg = str::from_utf8(&buffer[..amt]).unwrap();
-            if msg == "end" {
-                println!("IM BREAKIGN ANEGOAUEBOEUBF");
+            let recieved_chunk = &buffer[..amt];
+            // println!("Amt: {}", amt);
+            if recieved_chunk == b"MINSENDEND" {
                 src_server = src.to_string();
                 break;
-            } else {
-                let recieved_msg = msg.as_bytes();
-                recieved_image_bytes.append(&mut recieved_msg.to_vec());
-                println!("Received from server: {}", src)
             }
+            image_from_server.append(&mut recieved_chunk.to_vec());
         }
 
+        println!("Received from server: {}", src_server);
         let mut reconstructed_image_bytes = Vec::new();
-        for k in 0..recieved_image_bytes.len() {
-            reconstructed_image_bytes.push(recieved_image_bytes[k]);
+        for k in 0..image_from_server.len() {
+            reconstructed_image_bytes.push(image_from_server[k]);
         }
-        let mut reconstructed_image_bytes_final =
-            base64::decode(reconstructed_image_bytes).unwrap();
-        // create the file from the vector of bytes
-        let mut file = File::create("received_client.png").unwrap();
-        file.write_all(&reconstructed_image_bytes_final);
+        let mut file = File::create("final.png").unwrap();
+        file.write_all(&reconstructed_image_bytes);
 
-        // // decode the file
-        // let encoded_image = file_as_image_buffer("received_client.png".to_string());
-        // let dec = Decoder::new(encoded_image);
-        // let out_buffer = dec.decode_alpha();
-        // let clean_buffer: Vec<u8> = out_buffer.into_iter().filter(|b| *b != 0xff_u8).collect();
-        // let message = bytes_to_str(clean_buffer.as_slice());
-        // let decoded_image = base64::decode(message).unwrap();
-        // let path = format!("decoded_image_{}_client_{}.png", i, client_num);
-        // let mut file = File::create(path).unwrap();
-        // file.write_all(&decoded_image);
+        // decode the file
+        let encoded_image = file_as_image_buffer("final.png".to_string());
+        let dec = Decoder::new(encoded_image);
+        let out_buffer = dec.decode_alpha();
+        let clean_buffer: Vec<u8> = out_buffer.into_iter().filter(|b| *b != 0xff_u8).collect();
+        let message = bytes_to_str(clean_buffer.as_slice());
+        let decoded_image = base64::decode(message).unwrap();
+        let path = format!("decoded_image_{}_client_{}.png", i, client_num);
+        let mut file = File::create(path).unwrap();
+        file.write_all(&decoded_image);
 
         // let received_bytes: &[u8] = &buffer[..amt];
         // let received_vec = received_bytes.to_vec();
@@ -161,6 +168,6 @@ fn main() {
         // let mut file = File::create(path).unwrap();
         // file.write_all(&decoded_image);
 
-        println!("Received for i: {} from server: {}", i, src_server);
+        // println!("Received for i: {} from server: {}", i, src_server);
     }
 }
