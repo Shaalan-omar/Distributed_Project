@@ -1,7 +1,4 @@
 use base64::{decode, encode};
-use image::GenericImageView;
-use image::{DynamicImage, EncodableLayout, ImageBuffer, Rgba};
-use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
@@ -59,12 +56,9 @@ fn main() {
     );
 
     // load my image and convert it to bytes
-    // let my_pic = file_as_dynamic_image("mypic.png".to_string());
     let mut payload = File::open("big.png").unwrap();
     let mut payload_bytes = Vec::new();
     payload.read_to_end(&mut payload_bytes).unwrap();
-    // let payload_image_base64 = base64::encode(payload_bytes);
-    // let payload_image_base64_bytes = payload_image_base64.as_bytes();
 
     // fragment the image into bytes
     let mut fragmented_image_bytes = Vec::new();
@@ -73,16 +67,6 @@ fn main() {
     }
 
     println!("The size of the image is {}", fragmented_image_bytes.len());
-
-    // // REASSEMBLY PART
-    // let mut recieved_image_bytes: Vec<u8> = Vec::new();
-    // for x in payload_image_base64_bytes_vec {
-    //     recieved_image_bytes.append(&mut x.to_vec());
-    // }
-    // let mut file = File::create("received_client.png").unwrap();
-    // file.write_all(&recieved_image_bytes);
-
-    // println!("Sending {} chunks", payload_image_base64_bytes_vec.len());
 
     for i in 1..3 {
         for j in 0..fragmented_image_bytes.len() {
@@ -152,22 +136,5 @@ fn main() {
         let path = format!("decoded_image_{}_client_{}.png", i, client_num);
         let mut file = File::create(path).unwrap();
         file.write_all(&decoded_image);
-
-        // let received_bytes: &[u8] = &buffer[..amt];
-        // let received_vec = received_bytes.to_vec();
-        // let mut file = File::create("received.png").unwrap();
-        // file.write_all(&received_vec).unwrap();
-
-        // let encoded_image = file_as_image_buffer("received.png".to_string());
-        // let dec = Decoder::new(encoded_image);
-        // let out_buffer = dec.decode_alpha();
-        // let clean_buffer: Vec<u8> = out_buffer.into_iter().filter(|b| *b != 0xff_u8).collect();
-        // let message = bytes_to_str(clean_buffer.as_slice());
-        // let decoded_image = base64::decode(message).unwrap();
-        // let path = format!("decoded_image_{}_client_{}.png", i, client_num);
-        // let mut file = File::create(path).unwrap();
-        // file.write_all(&decoded_image);
-
-        // println!("Received for i: {} from server: {}", i, src_server);
     }
 }

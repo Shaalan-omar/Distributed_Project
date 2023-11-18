@@ -2,6 +2,7 @@ use base64::{decode, encode};
 use image::GenericImageView;
 use image::{DynamicImage, ImageBuffer, Rgba};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
@@ -197,14 +198,15 @@ fn main() {
     let mut election_starter = 1;
     let mut die_message_counter = 0;
 
+    let mut client_data: HashMap<String, Vec<u8>> = HashMap::new();
+
     let default_image = file_as_dynamic_image("default.png".to_string());
 
     // send from server to another server
     thread::sleep(Duration::from_secs(3));
     loop {
+        // starting election
         println!("----- MESSAGE NUMBER: {} ------", message_counter);
-        // println!("Memory usage: {}", mem_usage);
-        // println!("STARTED ELECTION");
         leader = election_logic(
             server_num,
             mem_usage,
@@ -214,8 +216,6 @@ fn main() {
             &socket1,
             &socket2,
         );
-        // println!("FINISHED ELECTION");
-        // println!("leader: {}", leader);
 
         //increase the memory usage for the leader
         if server_num == leader {
@@ -223,29 +223,40 @@ fn main() {
             println!("** SERVER {} IS THE LEADER **", server_num);
         }
 
-        // //all servers listen from client
-        // let (amt, src) = socket3.recv_from(&mut buffer).expect("Didn't receive data");
-        // let mut msg = str::from_utf8(&buffer[..amt]).unwrap();
-        // println!("Received: {} from {}", msg, src);
+        // all servers listen from client
         let mut src_client;
 
-        // vector of bytes to store the image
-        let mut image_from_client: Vec<u8> = Vec::new();
         // loop to recieve all chunks of the image from the client
-        let mut harbinger = 0;
         loop {
+            // recieve a fragment from any client
             let (amt, src) = socket3.recv_from(&mut buffer).expect("Didn't receive data");
             let recieved_chunk = &buffer[..amt];
-            // println!("Amt: {}", amt);
+            let sending_client = src.to_string();
+
+            //check this isnt the end of the message
             if recieved_chunk == b"MINSENDEND" {
                 println!("Finished recieving image from client: {}", src.to_string());
                 src_client = src.to_string();
                 break;
             }
-            image_from_client.append(&mut recieved_chunk.to_vec());
-            // println!("Harbinger: {}", harbinger);
-            harbinger += 1;
+
+            // add the fragment to the hashmap if client already sent, else create a new entry
+            if client_data.contains_key(&sending_client) {
+                let mut temp = client_data.get_mut(&sending_client).unwrap();
+                temp.append(&mut recieved_chunk.to_vec());
+            } else {
+                client_data.insert(sending_client, recieved_chunk.to_vec());
+            }
         }
+
+        //vector of bytes to store the image
+        let mut image_from_client: Vec<u8> = Vec::new();
+
+        //get the image from the hashmap with the client as the key using the get method
+        image_from_client = client_data.get(&src_client).unwrap().to_vec();
+
+        //remove it from the hashmap
+        client_data.remove(&src_client);
 
         // reconstruct the image from the fragments
         let mut reconstructed_image_bytes = Vec::new();
@@ -267,19 +278,17 @@ fn main() {
             let result = enc.encode_alpha();
             save_image_buffer(result, "hidden_message.png".to_string());
 
-            // // convert the result to base64
+            // convert the result to base64
             let mut payload = File::open("hidden_message.png").unwrap();
             let mut payload_bytes = Vec::new();
             payload.read_to_end(&mut payload_bytes).unwrap();
-            // let bytes = payload_bytes.as_slice();
 
             let mut fragmented_payload = Vec::new();
             for chunk in payload_bytes.chunks(1024) {
                 fragmented_payload.push(chunk);
             }
 
-            // println!("Length of fragmented payload: {}", fragmented_payload.len());
-
+            // send to client the encoded image.
             src_client = src_client.split(":").collect::<Vec<&str>>()[0].to_string();
             let temp = format!("{}:{}", src_client, ports[3]);
 
@@ -296,39 +305,6 @@ fn main() {
             socket4
                 .send_to(b"MINSENDEND", &temp)
                 .expect("Failed to send data to client");
-
-            // fragment the encrypted image
-            // let mut encrypted_image = File::open("hidden_message.png").unwrap();
-            // let mut encrypted_image_bytes = Vec::new();
-            // encrypted_image
-            //     .read_to_end(&mut encrypted_image_bytes)
-            //     .unwrap();
-
-            // let encrypted_image_base64 = encode(encrypted_image_bytes);
-            // let encrypted_image_base64_bytes = encrypted_image_base64.as_bytes();
-
-            // let mut encrypted_image_bytes_vec = Vec::new();
-            // for chunk in encrypted_image_base64_bytes.chunks(16383) {
-            //     encrypted_image_bytes_vec.push(chunk);
-            // }
-            // println!(
-            //     "Length of encrypted image bytes vec: {}",
-            //     encrypted_image_bytes_vec.len()
-            // );
-            // // send the encrypted image to the client
-            // for i in 0..encrypted_image_bytes_vec.len() {
-            //     socket4
-            //         .send_to(encrypted_image_bytes_vec[i], &temp)
-            //         .expect("Failed to send data to client");
-            //     println!("Sent chunk {}", i);
-            // }
-            // socket4
-            //     .send_to(b"end", &temp)
-            //     .expect("Failed to send data to client");
-            // println!(
-            //     "Server {} sent the encrypted image to the client {}",
-            //     server_num, src_client
-            // );
         }
 
         election_starter = leader;
@@ -359,6 +335,11 @@ fn main() {
             thread::sleep(Duration::from_secs(1));
         }
         message_counter += 1;
-        println!("IM HERE")
+        println!("IM HERE");
+        // print the contents of the map
+        println!("The size of the map is {}", client_data.len());
+        for (key, value) in &client_data {
+            println!("{}: {}", key, value.len());
+        }
     }
 }
