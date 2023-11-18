@@ -27,7 +27,7 @@ fn main() {
 
     let client_1 = "10.40.45.15";
     let client_2 = "10.40.54.147";
-    let client_3 = "127.0.0.6";
+    let client_3 = "10.40.44.161";
 
     let clients = vec![client_1, client_2, client_3];
 
@@ -41,9 +41,9 @@ fn main() {
     let listening_port = 5555;
     let sending_port = 6666;
 
-    let server_1_socket = "127.0.0.1:3333";
-    let server_2_socket = "127.0.0.2:3333";
-    let server_3_socket = "127.0.0.3:3333";
+    let server_1_socket = "10.40.41.254:3333";
+    let server_2_socket = "10.40.45.226:3333";
+    let server_3_socket = "10.40.32.26:3333";
 
     // client sends to server on port 3333
     // client receives from server on port 9999
