@@ -136,9 +136,9 @@ fn main() {
         .parse()
         .unwrap();
 
-    let server_1 = "172.20.10.2";
-    let server_2 = "172.20.10.9";
-    let server_3 = "172.20.10.8";
+    let server_1 = "10.40.41.254";
+    let server_2 = "10.40.35.226";
+    let server_3 = "10.40.32.26";
 
     let servers = vec![server_1, server_2, server_3];
 
@@ -230,7 +230,7 @@ fn main() {
             }
 
             if recieved_chunk == b"MINSENDEND" {
-                println!("Finished receiving image from client: {}", src.to_string());
+                // println!("Finished receiving image from client: {}", src.to_string());
                 src_client = src.to_string();
                 tx_clone.send(src_client).unwrap();
             }
@@ -330,7 +330,7 @@ fn main() {
             socket4
                 .send_to(b"MINSENDEND", &temp)
                 .expect("Failed to send data to client");
-            println!("Sent end to client: {}", src_client);
+            println!("COMPLETED AND SENT ENCRYPTION to client: {}", src_client);
         }
 
         election_starter = leader;
