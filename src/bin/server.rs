@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{process, str, thread};
+use std::{path, process, str, thread};
 use steganography::decoder::*;
 use steganography::encoder::*;
 use steganography::util::*;
@@ -243,8 +243,6 @@ fn main() {
     let mut election_starter = 1;
     let mut die_message_counter = 0;
 
-    // let mut client_data: HashMap<String, Vec<u8>> = HashMap::new(); // will be mutex
-
     let default_image = file_as_dynamic_image("default.png".to_string());
 
     // send from server to another server
@@ -267,32 +265,6 @@ fn main() {
             mem_usage += 2.0;
             println!("** SERVER {} IS THE LEADER **", server_num);
         }
-
-        // all servers listen from client
-        // let mut src_client;
-
-        // loop to recieve all chunks of the image from the client
-        // loop {
-        //     // recieve a fragment from any client
-        //     let (amt, src) = socket3.recv_from(&mut buffer).expect("Didn't receive data");
-        //     let recieved_chunk = &buffer[..amt];
-        //     let sending_client = src.to_string();
-
-        //     //check this isnt the end of the message
-        //     if recieved_chunk == b"MINSENDEND" {
-        //         println!("Finished recieving image from client: {}", src.to_string());
-        //         src_client = src.to_string();
-        //         break;
-        //     }
-
-        //     // add the fragment to the hashmap if client already sent, else create a new entry
-        //     if client_data.contains_key(&sending_client) {
-        //         let mut temp = client_data.get_mut(&sending_client).unwrap();
-        //         temp.append(&mut recieved_chunk.to_vec());
-        //     } else {
-        //         client_data.insert(sending_client, recieved_chunk.to_vec());
-        //     }
-        // }
 
         //vector of bytes to store the image
         let mut src_client = rx.recv().unwrap();
@@ -328,10 +300,11 @@ fn main() {
             let bytes_to_send = msg_bytes_base64.as_bytes();
             let enc = Encoder::new(bytes_to_send, default_image.clone());
             let result = enc.encode_alpha();
-            save_image_buffer(result, "hidden_message.png".to_string());
+            let path = format!("hidden_message_{}.png", message_counter);
+            save_image_buffer(result, path.clone());
 
             // convert the result to base64
-            let mut payload = File::open("hidden_message.png").unwrap();
+            let mut payload = File::open(path).unwrap();
             let mut payload_bytes = Vec::new();
             payload.read_to_end(&mut payload_bytes).unwrap();
 
@@ -357,6 +330,7 @@ fn main() {
             socket4
                 .send_to(b"MINSENDEND", &temp)
                 .expect("Failed to send data to client");
+            println!("Sent end to client: {}", src_client);
         }
 
         election_starter = leader;
@@ -387,7 +361,5 @@ fn main() {
             thread::sleep(Duration::from_secs(1));
         }
         message_counter += 1;
-        println!("IM HERE");
-        // print the contents of the map
     }
 }
