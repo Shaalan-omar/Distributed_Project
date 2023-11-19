@@ -41,9 +41,9 @@ fn main() {
     let listening_port = 5555;
     let sending_port = 6666;
 
-    let server_1_socket = "172.20.10.2:3333";
-    let server_2_socket = "172.20.10.9:3333";
-    let server_3_socket = "172.20.10.11:3333";
+    let server_1_socket = "10.40.54.147:3333";
+    let server_2_socket = "10.40.41.254:3333";
+    let server_3_socket = "10.40.42.252:3333";
 
     // client sends to server on port 3333
     // client receives from server on port 9999
