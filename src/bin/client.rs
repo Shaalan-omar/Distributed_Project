@@ -25,7 +25,7 @@ fn main() {
         .parse()
         .unwrap();
 
-    let client_1 = "172.20.10.10";
+    let client_1 = "10.40.35.226";
     let client_2 = "172.20.10.7";
     let client_3 = "172.20.10.11";
 
