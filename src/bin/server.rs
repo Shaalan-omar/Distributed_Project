@@ -136,9 +136,9 @@ fn main() {
         .parse()
         .unwrap();
 
-    let server_1 = "172.20.10.2";
-    let server_2 = "172.20.10.9";
-    let server_3 = "172.20.10.11";
+    let server_1 = "10.40.54.147";
+    let server_2 = "10.40.41.254";
+    let server_3 = "10.40.42.252";
 
     let servers = vec![server_1, server_2, server_3];
 
