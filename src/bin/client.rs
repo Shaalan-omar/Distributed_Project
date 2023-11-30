@@ -1,4 +1,5 @@
 use base64::{decode, encode};
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
@@ -25,9 +26,9 @@ fn main() {
         .parse()
         .unwrap();
 
-    let client_1 = "10.40.35.226";
-    let client_2 = "172.20.10.7";
-    let client_3 = "172.20.10.11";
+    let client_1 = "127.0.0.4";
+    let client_2 = "127.0.0.5";
+    let client_3 = "127.0.0.6";
 
     let clients = vec![client_1, client_2, client_3];
 
@@ -41,14 +42,27 @@ fn main() {
     let listening_port = 5555;
     let sending_port = 6666;
 
-    let server_1_socket = "10.40.54.147:3333";
-    let server_2_socket = "10.40.41.254:3333";
-    let server_3_socket = "10.40.42.252:3333";
+    let server_1_socket = "127.0.0.1:3333";
+    let server_2_socket = "127.0.0.2:3333";
+    let server_3_socket = "127.0.0.3:3333";
 
     // client sends to server on port 3333
     // client receives from server on port 9999
     let sending_socket = create_socket(client_ip, 3333);
     let recieving_socket = create_socket(client_ip, 9999);
+
+    // request type to server:
+    // 1. send image
+    // 2. ask for directory of service
+    let request_type_image = 1;
+    let request_type_directory: u8 = 2;
+
+    #[derive(Serialize, Deserialize, Debug)]
+    // struct that contains image fragment and request type
+    struct ImageFragment {
+        fragment: Vec<u8>,
+        request_type: u8,
+    }
 
     println!(
         "Client {} listening on IP address {}",
@@ -66,37 +80,52 @@ fn main() {
         fragmented_image_bytes.push(chunk);
     }
 
-    // println!("The size of the image is {}", fragmented_image_bytes.len());
-
     for i in 1..11 {
         for j in 0..fragmented_image_bytes.len() {
+            // send the struct to the server
+            let image_fragment = ImageFragment {
+                fragment: fragmented_image_bytes[j].to_vec(),
+                request_type: request_type_image,
+            };
+
+            let encoded = serde_json::to_string(&image_fragment).unwrap();
+
             // send to server1
             sending_socket
-                .send_to(fragmented_image_bytes[j], &server_1_socket)
+                .send_to(encoded.as_bytes(), &server_1_socket)
                 .expect("Failed to send data to server");
             // send to server2
             sending_socket
-                .send_to(fragmented_image_bytes[j], &server_2_socket)
+                .send_to(encoded.as_bytes(), &server_2_socket)
                 .expect("Failed to send data to server");
             // send to server3
             sending_socket
-                .send_to(fragmented_image_bytes[j], &server_3_socket)
+                .send_to(encoded.as_bytes(), &server_3_socket)
                 .expect("Failed to send data to server");
-            // println!("Sent chunk {} to all servers", j);
+
             if j % 20 == 0 && j != 0 {
                 // sleep for 1 second
                 thread::sleep(Duration::from_millis(10));
             }
         }
         println!("Sent picture number {} to all servers", i);
+
+        // send end to all servers
+        let end_message = "MINSENDEND";
+        let final_message = ImageFragment {
+            fragment: end_message.as_bytes().to_vec(),
+            request_type: request_type_image,
+        };
+        let encoded = serde_json::to_string(&final_message).unwrap();
+
         sending_socket
-            .send_to(b"MINSENDEND", &server_1_socket)
+            .send_to(encoded.as_bytes(), &server_1_socket)
             .expect("Failed to send data to server");
         sending_socket
-            .send_to(b"MINSENDEND", &server_2_socket)
+            .send_to(encoded.as_bytes(), &server_2_socket)
             .expect("Failed to send data to server");
         sending_socket
-            .send_to(b"MINSENDEND", &server_3_socket)
+            .send_to(encoded.as_bytes(), &server_3_socket)
             .expect("Failed to send data to server");
         println!("Sent end to all servers");
 

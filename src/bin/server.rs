@@ -2,7 +2,7 @@ use base64::{decode, encode};
 use image::GenericImageView;
 use image::{DynamicImage, ImageBuffer, Rgba};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
@@ -19,6 +19,18 @@ use sysinfo::{System, SystemExt};
 struct ServerInfo {
     server: u16,
     mem_usage: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ClientInfo {
+    ip: IpAddr,
+    // will add more later like number of images and so on
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ImageFragment {
+    fragment: Vec<u8>,
+    request_type: u8,
 }
 
 fn create_socket(server_ip: &str, port: u16) -> UdpSocket {
@@ -136,9 +148,9 @@ fn main() {
         .parse()
         .unwrap();
 
-    let server_1 = "10.40.54.147";
-    let server_2 = "10.40.41.254";
-    let server_3 = "10.40.42.252";
+    let server_1 = "127.0.0.1";
+    let server_2 = "127.0.0.2";
+    let server_3 = "127.0.0.3";
 
     let servers = vec![server_1, server_2, server_3];
 
@@ -195,6 +207,8 @@ fn main() {
     let socket4 = create_socket(server_ip, ports[3]); // server send to client
 
     let client_data: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+    // Client IPs directory
+    let client_ips: Arc<Mutex<HashSet<IpAddr>>> = Arc::new(Mutex::new(HashSet::new()));
 
     // create a channel to communicate between the receiving thread and the main thread
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
@@ -206,6 +220,7 @@ fn main() {
 
     /////////////////////////////////////////////////////////////////
     /// thread to receive image data from clients
+    let client_ips_arc = Arc::clone(&client_ips);
     thread::spawn(move || {
         let mut buffer = [0; 65535];
         let mut src_client;
@@ -214,8 +229,22 @@ fn main() {
             let (amt, src) = rec_socket
                 .recv_from(&mut buffer)
                 .expect("Didn't receive data");
-            let recieved_chunk = &buffer[..amt];
+
+            // get the ip of the cient and insert into DOS if first time to send
+            let client_ip = src.ip();
+            let mut client_ips_lock = client_ips_arc.lock().unwrap();
+            if client_ips_lock.insert(client_ip) {
+                println!("New client connected with IP: {}", client_ip);
+            }
+
             let sending_client = src.to_string();
+
+            // take the fragment and deserialize it into an ImageFragment struct
+            let msg = str::from_utf8(&buffer[..amt]).unwrap();
+            let image_fragment: ImageFragment = serde_json::from_str(msg).unwrap();
+            // the chunk and the request type that will be used to differentiate between requests.
+            let recieved_chunk = &image_fragment.fragment;
+            let request_type = image_fragment.request_type;
 
             // add the fragment to the hashmap if client already sent, else create a new entry
             if data_arc.lock().unwrap().contains_key(&sending_client) {
@@ -244,7 +273,6 @@ fn main() {
     let mut die_message_counter = 0;
 
     let default_image = file_as_dynamic_image("default.png".to_string());
-
     // send from server to another server
     thread::sleep(Duration::from_secs(3));
     loop {
@@ -361,5 +389,12 @@ fn main() {
             thread::sleep(Duration::from_secs(1));
         }
         message_counter += 1;
+
+        //print the directory of service( client ips)
+        println!("----- DIRECTORY OF SERVICE -----");
+        let client_ips_lock = client_ips.lock().unwrap();
+        for ip in client_ips_lock.iter() {
+            println!("{}", ip);
+        }
     }
 }
