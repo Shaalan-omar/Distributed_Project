@@ -19,6 +19,13 @@ fn create_socket(client_ip: &str, port: u16) -> UdpSocket {
     UdpSocket::bind(socket_addr).expect("Failed to bind socket")
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+// struct that contains image fragment and request type
+struct ImageFragment {
+    fragment: Vec<u8>,
+    request_type: u8,
+}
+
 fn main() {
     let client_num: u16 = std::env::args()
         .nth(1)
@@ -57,13 +64,6 @@ fn main() {
     let request_type_image = 1;
     let request_type_directory: u8 = 2;
 
-    #[derive(Serialize, Deserialize, Debug)]
-    // struct that contains image fragment and request type
-    struct ImageFragment {
-        fragment: Vec<u8>,
-        request_type: u8,
-    }
-
     println!(
         "Client {} listening on IP address {}",
         client_num, client_ip
@@ -80,71 +80,111 @@ fn main() {
         fragmented_image_bytes.push(chunk);
     }
 
-    for i in 1..11 {
-        for j in 0..fragmented_image_bytes.len() {
-            // send the struct to the server
-            let image_fragment = ImageFragment {
-                fragment: fragmented_image_bytes[j].to_vec(),
-                request_type: request_type_image,
+    for i in 1..6 {
+        if i % 2 == 0 {
+            // send for directory of service every other time
+            let directory_request = ImageFragment {
+                fragment: Vec::new(),
+                request_type: request_type_directory,
             };
-
-            let encoded = serde_json::to_string(&image_fragment).unwrap();
-
-            // send to server1
+            let encoded = serde_json::to_string(&directory_request).unwrap();
             sending_socket
                 .send_to(encoded.as_bytes(), &server_1_socket)
                 .expect("Failed to send data to server");
-            // send to server2
             sending_socket
                 .send_to(encoded.as_bytes(), &server_2_socket)
                 .expect("Failed to send data to server");
-            // send to server3
             sending_socket
                 .send_to(encoded.as_bytes(), &server_3_socket)
                 .expect("Failed to send data to server");
+            println!("Sent directory request to all servers");
+        } else {
+            // else send the image to all servers.
+            for j in 0..fragmented_image_bytes.len() {
+                // send the struct to the server
+                let image_fragment = ImageFragment {
+                    fragment: fragmented_image_bytes[j].to_vec(),
+                    request_type: request_type_image,
+                };
 
-            if j % 20 == 0 && j != 0 {
-                // sleep for 1 second
-                thread::sleep(Duration::from_millis(10));
+                let encoded = serde_json::to_string(&image_fragment).unwrap();
+
+                // send to server1
+                sending_socket
+                    .send_to(encoded.as_bytes(), &server_1_socket)
+                    .expect("Failed to send data to server");
+                // send to server2
+                sending_socket
+                    .send_to(encoded.as_bytes(), &server_2_socket)
+                    .expect("Failed to send data to server");
+                // send to server3
+                sending_socket
+                    .send_to(encoded.as_bytes(), &server_3_socket)
+                    .expect("Failed to send data to server");
+
+                if j % 20 == 0 && j != 0 {
+                    // sleep for 1 second
+                    thread::sleep(Duration::from_millis(10));
+                }
             }
+            println!("Sent picture number {} to all servers", i);
+
+            // send end to all servers
+            let end_message = "MINSENDEND";
+            let final_message = ImageFragment {
+                fragment: end_message.as_bytes().to_vec(),
+                request_type: request_type_image,
+            };
+            let encoded = serde_json::to_string(&final_message).unwrap();
+
+            sending_socket
+                .send_to(encoded.as_bytes(), &server_1_socket)
+                .expect("Failed to send data to server");
+            sending_socket
+                .send_to(encoded.as_bytes(), &server_2_socket)
+                .expect("Failed to send data to server");
+            sending_socket
+                .send_to(encoded.as_bytes(), &server_3_socket)
+                .expect("Failed to send data to server");
+            println!("Sent end to all servers");
         }
-        println!("Sent picture number {} to all servers", i);
-
-        // send end to all servers
-        let end_message = "MINSENDEND";
-        let final_message = ImageFragment {
-            fragment: end_message.as_bytes().to_vec(),
-            request_type: request_type_image,
-        };
-        let encoded = serde_json::to_string(&final_message).unwrap();
-
-        sending_socket
-            .send_to(encoded.as_bytes(), &server_1_socket)
-            .expect("Failed to send data to server");
-        sending_socket
-            .send_to(encoded.as_bytes(), &server_2_socket)
-            .expect("Failed to send data to server");
-        sending_socket
-            .send_to(encoded.as_bytes(), &server_3_socket)
-            .expect("Failed to send data to server");
-        println!("Sent end to all servers");
 
         // // await responses from the leading server
         let mut buffer = [0; 65535];
         let mut src_server;
 
         let mut image_from_server: Vec<u8> = Vec::new();
+        let mut isimage = true;
         loop {
+            // recieve image fragments from server, if it is a directory, print it, else, append to image_from_server
             let (amt, src) = recieving_socket
                 .recv_from(&mut buffer)
                 .expect("Didn't receive data");
-            let recieved_chunk = &buffer[..amt];
-            // println!("Amt: {}", amt);
-            if recieved_chunk == b"MINSENDEND" {
-                src_server = src.to_string();
+
+            let msg = str::from_utf8(&buffer[..amt]).unwrap();
+            let image_fragment: ImageFragment = serde_json::from_str(msg).unwrap();
+            let recieved_chunk = image_fragment.fragment;
+            let request_type = image_fragment.request_type;
+            src_server = src.to_string();
+
+            if request_type == request_type_directory {
+                println!("Received directory from server: {}", src);
+                println!("{}", str::from_utf8(&recieved_chunk).unwrap());
+                isimage = false;
+                // HERE WE CAN DO SOMETHING WITH THE DIRECTORY
                 break;
+            } else if request_type == request_type_image {
+                if recieved_chunk == b"MINSENDEND" {
+                    break;
+                }
+                image_from_server.append(&mut recieved_chunk.to_vec());
             }
-            image_from_server.append(&mut recieved_chunk.to_vec());
+        }
+
+        // if we recieved a directory, continue and dont decode the image
+        if !isimage {
+            isimage = true;
+            continue;
         }
 
         println!("Received encyrption from server: {}", src_server);

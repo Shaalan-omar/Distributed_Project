@@ -161,6 +161,12 @@ fn main() {
         _ => panic!("Invalid server number"),
     };
 
+    // request type to server:
+    // 1. send image
+    // 2. ask for directory of service
+    let request_type_image = 1;
+    let request_type_directory: u8 = 2;
+
     // get the memory usage per server
     let mut system = System::new_all();
     system.refresh_all();
@@ -246,6 +252,20 @@ fn main() {
             let recieved_chunk = &image_fragment.fragment;
             let request_type = image_fragment.request_type;
 
+            // if the request type is directory, send to main process ip_dirrr and continue
+            if request_type == request_type_directory {
+                src_client = src.to_string();
+                src_client.push_str("_dirrr");
+                tx_clone.send(src_client).unwrap();
+                continue;
+            }
+
+            if recieved_chunk == b"MINSENDEND" {
+                // println!("Finished receiving image from client: {}", src.to_string());
+                src_client = src.to_string();
+                tx_clone.send(src_client).unwrap();
+                continue;
+            }
             // add the fragment to the hashmap if client already sent, else create a new entry
             if data_arc.lock().unwrap().contains_key(&sending_client) {
                 let mut x = data_arc.lock().unwrap();
@@ -256,12 +276,6 @@ fn main() {
                     .lock()
                     .unwrap()
                     .insert(sending_client, recieved_chunk.to_vec());
-            }
-
-            if recieved_chunk == b"MINSENDEND" {
-                // println!("Finished receiving image from client: {}", src.to_string());
-                src_client = src.to_string();
-                tx_clone.send(src_client).unwrap();
             }
         }
     });
@@ -296,8 +310,39 @@ fn main() {
 
         //vector of bytes to store the image
         let mut src_client = rx.recv().unwrap();
-        let mut image_from_client: Vec<u8> = Vec::new();
 
+        // if the src_client has _dirrr, then it is a directory request
+        if src_client.contains("_dirrr") {
+            // get the src of the client to send directory to.
+            src_client = src_client.split("_dirrr").collect::<Vec<&str>>()[0].to_string();
+            src_client = src_client.split(":").collect::<Vec<&str>>()[0].to_string();
+            if server_num == leader {
+                let temp = format!("{}:{}", src_client, ports[3]);
+                println!("----- SENDING DIRECTORY TO CLIENT WITH IP: {} -----", temp);
+                // unlock the mutex and send the directory to the client
+                let mut directory = String::new();
+                let client_ips_lock = client_ips.lock().unwrap();
+                for ip in client_ips_lock.iter() {
+                    directory.push_str(&ip.to_string());
+                    directory.push_str("\n");
+                }
+                // create the fragment with the directory and send it to the client only if leader.
+                let image_fragment = ImageFragment {
+                    fragment: directory.as_bytes().to_vec(),
+                    request_type: request_type_directory,
+                };
+                let encoded = serde_json::to_string(&image_fragment).unwrap();
+                socket4
+                    .send_to(encoded.as_bytes(), &temp)
+                    .expect("Failed to send data to client");
+            }
+            // to resume normal election and message sending after directory request
+            election_starter = leader;
+            message_counter += 1;
+            continue;
+        }
+
+        let mut image_from_client: Vec<u8> = Vec::new();
         //get the image from the hashmap with the client as the key using the get method
         // image_from_client = client_data.get(&src_client).unwrap().to_vec();
         image_from_client = client_data
@@ -346,19 +391,31 @@ fn main() {
             let temp = format!("{}:{}", src_client, ports[3]);
 
             for j in 0..fragmented_payload.len() {
+                // send an image fragment
+                let image_fragment = ImageFragment {
+                    fragment: fragmented_payload[j].to_vec(),
+                    request_type: request_type_image,
+                };
+                let encoded = serde_json::to_string(&image_fragment).unwrap();
                 socket4
-                    .send_to(fragmented_payload[j], &temp)
+                    .send_to(encoded.as_bytes(), &temp)
                     .expect("Failed to send data to client");
-                // println!("Sent chunk {}", j);
 
                 if j % 20 == 0 && j != 0 {
                     thread::sleep(Duration::from_millis(10));
                 }
             }
+            // send end to client
+            let end_message = "MINSENDEND";
+            let final_message = ImageFragment {
+                fragment: end_message.as_bytes().to_vec(),
+                request_type: request_type_image,
+            };
+            let encoded = serde_json::to_string(&final_message).unwrap();
             socket4
-                .send_to(b"MINSENDEND", &temp)
+                .send_to(encoded.as_bytes(), &temp)
                 .expect("Failed to send data to client");
-            println!("COMPLETED AND SENT ENCRYPTION to client: {}", src_client);
+            println!("----- SENDING IMAGE TO CLIENT WITH IP: {} -----", temp);
         }
 
         election_starter = leader;
@@ -391,10 +448,10 @@ fn main() {
         message_counter += 1;
 
         //print the directory of service( client ips)
-        println!("----- DIRECTORY OF SERVICE -----");
-        let client_ips_lock = client_ips.lock().unwrap();
-        for ip in client_ips_lock.iter() {
-            println!("{}", ip);
-        }
+        // println!("----- DIRECTORY OF SERVICE -----");
+        // let client_ips_lock = client_ips.lock().unwrap();
+        // for ip in client_ips_lock.iter() {
+        //     println!("{}", ip);
+        // }
     }
 }
