@@ -1,5 +1,6 @@
 use base64::{decode, encode};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet as Hashset;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
@@ -46,8 +47,11 @@ fn main() {
         _ => panic!("Invalid server number"),
     };
 
+    // between clients
     let listening_port = 5555;
     let sending_port = 6666;
+    let client_send_socket = create_socket(client_ip, sending_port);
+    let client_listen_socket = create_socket(client_ip, listening_port);
 
     let server_1_socket = "127.0.0.1:3333";
     let server_2_socket = "127.0.0.2:3333";
@@ -69,6 +73,9 @@ fn main() {
         client_num, client_ip
     );
 
+    // directory of service is a hashset of IPv4 addresses
+    let mut directory_of_service: Hashset<String> = Hashset::new();
+
     // load my image and convert it to bytes
     let mut payload = File::open("big.png").unwrap();
     let mut payload_bytes = Vec::new();
@@ -80,7 +87,7 @@ fn main() {
         fragmented_image_bytes.push(chunk);
     }
 
-    for i in 1..6 {
+    for i in 1..7 {
         if i % 2 == 0 {
             // send for directory of service every other time
             let directory_request = ImageFragment {
@@ -171,7 +178,19 @@ fn main() {
                 println!("Received directory from server: {}", src);
                 println!("{}", str::from_utf8(&recieved_chunk).unwrap());
                 isimage = false;
-                // HERE WE CAN DO SOMETHING WITH THE DIRECTORY
+
+                // the recieved chunk has IPs separated by newlines
+                let directory = str::from_utf8(&recieved_chunk).unwrap();
+                let directory = directory.split("\n");
+                for ip in directory {
+                    // make sure its not an empty string
+                    if ip == "" || ip == client_ip {
+                        continue;
+                    }
+                    // add to directory of service with listening port
+                    let ip = format!("{}:{}", ip, listening_port);
+                    directory_of_service.insert(ip);
+                }
                 break;
             } else if request_type == request_type_image {
                 if recieved_chunk == b"MINSENDEND" {
@@ -205,5 +224,36 @@ fn main() {
         let path = format!("decoded_image_{}_client_{}.png", i, client_num);
         let mut file = File::create(path).unwrap();
         file.write_all(&decoded_image);
+    }
+
+    // print directory of service
+    println!("Directory of service:");
+    for ip in directory_of_service.clone() {
+        println!("{}", ip);
+    }
+
+    // create a socket to listen for messages from other clients
+
+    if client_num == 1 {
+        // sleep for 2 seconds to make sure all clients are listening
+        thread::sleep(Duration::from_millis(2000));
+        println!("Sending message to clients");
+        // send message to clients in directory of service
+        for ip in directory_of_service {
+            let message = "Hello from client 1";
+            client_send_socket
+                .send_to(message.as_bytes(), &ip)
+                .expect("Failed to send data to server");
+        }
+    } else {
+        // listen for messages from clients
+        let mut buffer = [0; 65535];
+        loop {
+            let (amt, src) = client_listen_socket
+                .recv_from(&mut buffer)
+                .expect("Didn't receive data");
+            let msg = str::from_utf8(&buffer[..amt]).unwrap();
+            println!("Received message from client: {} with src: {}", msg, src);
+        }
     }
 }

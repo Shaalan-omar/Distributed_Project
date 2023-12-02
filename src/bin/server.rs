@@ -338,6 +338,18 @@ fn main() {
             }
             // to resume normal election and message sending after directory request
             election_starter = leader;
+            // revive the dead server by decreasing the memory usage of the dead server by 1000 after 3 messages
+            if (mem_usage >= 1000.0) {
+                let flag: bool = (message_counter != die_message_counter + 1)
+                    && (message_counter != die_message_counter + 2)
+                    && (message_counter != die_message_counter + 3);
+                if (message_counter % 4 == 0) && (message_counter != 0) && flag {
+                    println!("----- RELOADING THIS SERVER -----");
+                    // change the memory usage of a random server
+                    mem_usage -= 1000.0;
+                }
+            }
+
             message_counter += 1;
             continue;
         }
@@ -446,12 +458,5 @@ fn main() {
             thread::sleep(Duration::from_secs(1));
         }
         message_counter += 1;
-
-        //print the directory of service( client ips)
-        // println!("----- DIRECTORY OF SERVICE -----");
-        // let client_ips_lock = client_ips.lock().unwrap();
-        // for ip in client_ips_lock.iter() {
-        //     println!("{}", ip);
-        // }
     }
 }
