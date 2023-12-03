@@ -373,7 +373,7 @@ fn main() {
             reconstructed_image_bytes.push(image_from_client[j]);
         }
         // let decoded_image = base64::decode(reconstructed_image_bytes).unwrap();
-        let path = format!("decoded_image_message{}.png", message_counter);
+        let path = format!("decoded_image_message_{}.png", message_counter);
         let mut file = File::create(path).unwrap();
         file.write_all(&reconstructed_image_bytes);
 
@@ -413,8 +413,8 @@ fn main() {
                     .send_to(encoded.as_bytes(), &temp)
                     .expect("Failed to send data to client");
 
-                if j % 20 == 0 && j != 0 {
-                    thread::sleep(Duration::from_millis(10));
+                if j % 15 == 0 {
+                    thread::sleep(Duration::from_millis(20));
                 }
             }
             // send end to client
