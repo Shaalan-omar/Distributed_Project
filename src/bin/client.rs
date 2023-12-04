@@ -35,6 +35,9 @@ struct MessageType {
     id: u8,
     image_fragment: Vec<u8>,
     views: i32,
+    name: String,
+    is_sample: bool,
+    sample_num: u8,
 }
 
 fn open_image(image_path: &str) {
@@ -128,19 +131,20 @@ fn main() {
     // all encoded images vector
     let mut all_encoded_images: Vec<Vec<u8>> = Vec::new();
 
-    // load my image and convert it to bytes
-    let mut payload = File::open("big.png").unwrap();
+    // compressed image vector
+    let mut all_compressed_images: Vec<Vec<u8>> = Vec::new();
+    // fill it up with the big_compressed.png and pic2_compressed.png
+    let mut payload = File::open("big_compressed.png").unwrap();
     let mut payload_bytes = Vec::new();
     payload.read_to_end(&mut payload_bytes).unwrap();
+    all_compressed_images.push(payload_bytes);
+    let mut payload = File::open("pic2_compressed.png").unwrap();
+    let mut payload_bytes = Vec::new();
+    payload.read_to_end(&mut payload_bytes).unwrap();
+    all_compressed_images.push(payload_bytes);
 
-    // fragment the image into bytes
-    let mut fragmented_image_bytes = Vec::new();
-    for chunk in payload_bytes.chunks(1024) {
-        fragmented_image_bytes.push(chunk);
-    }
-
-    for i in 1..3 {
-        if i % 2 == 0 {
+    for i in 1..4 {
+        if i == 3 {
             // send for directory of service every other time
             let directory_request = ImageFragment {
                 fragment: Vec::new(),
@@ -157,7 +161,78 @@ fn main() {
                 .send_to(encoded.as_bytes(), &server_3_socket)
                 .expect("Failed to send data to server");
             println!("Sent directory request to all servers");
-        } else {
+        } else if i == 1 {
+            let mut fragmented_image_bytes = Vec::new();
+            // load my image and convert it to bytes
+            let mut payload = File::open("big.png").unwrap();
+            let mut payload_bytes = Vec::new();
+            payload.read_to_end(&mut payload_bytes).unwrap();
+
+            // fragment the image into bytes
+            for chunk in payload_bytes.chunks(1024) {
+                fragmented_image_bytes.push(chunk);
+            }
+
+            // else send the image to all servers.
+            for j in 0..fragmented_image_bytes.len() {
+                // send the struct to the server
+                let image_fragment = ImageFragment {
+                    fragment: fragmented_image_bytes[j].to_vec(),
+                    request_type: request_type_image,
+                };
+
+                let encoded = serde_json::to_string(&image_fragment).unwrap();
+
+                // send to server1
+                sending_socket
+                    .send_to(encoded.as_bytes(), &server_1_socket)
+                    .expect("Failed to send data to server");
+                // send to server2
+                sending_socket
+                    .send_to(encoded.as_bytes(), &server_2_socket)
+                    .expect("Failed to send data to server");
+                // send to server3
+                sending_socket
+                    .send_to(encoded.as_bytes(), &server_3_socket)
+                    .expect("Failed to send data to server");
+
+                if j % 15 == 0 {
+                    // sleep for 1 second
+                    thread::sleep(Duration::from_millis(20));
+                }
+            }
+            println!("Sent picture number {} to all servers", i);
+
+            // send end to all servers
+            let end_message = "MINSENDEND";
+            let final_message = ImageFragment {
+                fragment: end_message.as_bytes().to_vec(),
+                request_type: request_type_image,
+            };
+            let encoded = serde_json::to_string(&final_message).unwrap();
+
+            sending_socket
+                .send_to(encoded.as_bytes(), &server_1_socket)
+                .expect("Failed to send data to server");
+            sending_socket
+                .send_to(encoded.as_bytes(), &server_2_socket)
+                .expect("Failed to send data to server");
+            sending_socket
+                .send_to(encoded.as_bytes(), &server_3_socket)
+                .expect("Failed to send data to server");
+            println!("Sent end to all servers");
+        } else if i == 2 {
+            let mut fragmented_image_bytes = Vec::new();
+            // load my image and convert it to bytes
+            let mut payload = File::open("pic2.png").unwrap();
+            let mut payload_bytes = Vec::new();
+            payload.read_to_end(&mut payload_bytes).unwrap();
+
+            // fragment the image into bytes
+            for chunk in payload_bytes.chunks(1024) {
+                fragmented_image_bytes.push(chunk);
+            }
+
             // else send the image to all servers.
             for j in 0..fragmented_image_bytes.len() {
                 // send the struct to the server
@@ -303,6 +378,10 @@ fn main() {
     let client_send_copy = client_send_socket.try_clone().unwrap();
     let mut reconstructed_image_bytes: Vec<u8> = Vec::new();
 
+    let mut img_counter: u16 = 1;
+
+    let mut compressed_images_recieved: Vec<Vec<u8>> = Vec::new();
+
     thread::spawn(move || {
         loop {
             // listen for messages from the requesting client
@@ -316,31 +395,79 @@ fn main() {
             let id = message.id;
             let image_fragment = message.image_fragment;
             let views = message.views;
+            let name = message.name;
+            let is_sample = message.is_sample;
+            let sample_num = message.sample_num;
             let src = src.ip();
             let src = format!("{}:{}", src, listening_port);
 
             if id == 1 {
                 // this is the first message. send the number of images.
-                // send the number of images to the requesting client
+                // send the compressed images to the requesting client
                 let num_images = all_encoded_images.len().to_string();
-                let message = MessageType {
-                    message: num_images,
-                    id: 2,
-                    image_fragment: Vec::new(),
-                    views: 0,
-                };
-                let encoded = serde_json::to_string(&message).unwrap();
-                println!("Sending number of images to requesting client");
-                client_send_copy
-                    .send_to(encoded.as_bytes(), &src)
-                    .expect("Failed to send data to server");
+                println!("Sending compressed images to client");
+                for i in 0..all_compressed_images.len() {
+                    // send the struct to the client
+                    // if its the last image, send the end message
+                    let mut image_fragment: MessageType;
+                    if i == all_compressed_images.len() - 1 {
+                        image_fragment = MessageType {
+                            message: String::new(),
+                            id: 2,
+                            image_fragment: all_compressed_images[i].clone(),
+                            views: 1000,
+                            name: "".to_string(),
+                            is_sample: true,
+                            sample_num: i as u8,
+                        };
+                    } else {
+                        image_fragment = MessageType {
+                            message: String::new(),
+                            id: 2,
+                            image_fragment: all_compressed_images[i].clone(),
+                            views: 0,
+                            name: "".to_string(),
+                            is_sample: true,
+                            sample_num: i as u8,
+                        };
+                    }
+                    let encoded = serde_json::to_string(&image_fragment).unwrap();
+                    // send to the requesting client
+                    client_send_copy
+                        .send_to(encoded.as_bytes(), &src)
+                        .expect("Failed to send data to server");
+                }
             }
             if id == 2 {
-                // this is the second message. recieves the number of images
-                let num_images = msg.parse::<usize>().unwrap();
-                // choose a random image
-                println!("NUM IMAGES: {}", num_images);
-                println!("Enter the number of the image you want to send:");
+                // this is the second message. recieves the compressed images.
+                // saves them into a vector.
+                // if the last image is sent, whe views = 1000.
+                // open both images and ask the user which one they want to request.
+
+                let mut compressed_image = image_fragment.clone();
+                if views != 1000 {
+                    compressed_images_recieved.push(compressed_image.clone());
+                    continue;
+                }
+                compressed_images_recieved.push(compressed_image.clone());
+
+                // open both compressed images and ask the user which one they want to request.
+                let mut num = 1;
+                for image in compressed_images_recieved.clone() {
+                    let path = format!(
+                        "compressed_image_{}_client_{}_{}.png",
+                        num, client_num, name
+                    );
+                    let mut file = File::create(path.clone()).unwrap();
+                    file.write_all(&image);
+                    open_image(&path);
+                    delete_image(&path);
+                    num += 1;
+                }
+                // clear the compressed images recieved vector
+                compressed_images_recieved.clear();
+                // ask the user which image they want to request
+                println!("Enter the number of the image you want to request:");
                 let mut image_to_send = String::new();
                 std::io::stdin()
                     .read_line(&mut image_to_send)
@@ -353,6 +480,9 @@ fn main() {
                     id: 3,
                     image_fragment: Vec::new(),
                     views: 0,
+                    name: "".to_string(),
+                    is_sample: false,
+                    sample_num: 0,
                 };
                 let encoded = serde_json::to_string(&message).unwrap();
                 println!("Sending to src: {}", src);
@@ -381,6 +511,9 @@ fn main() {
                         id: 4,
                         image_fragment: encoded_image_chunks[j].to_vec(),
                         views: 0,
+                        name: "".to_string(),
+                        is_sample: false,
+                        sample_num: 0,
                     };
                     let encoded = serde_json::to_string(&image_fragment).unwrap();
                     // send to the requesting client
@@ -399,11 +532,15 @@ fn main() {
                     id: 4,
                     image_fragment: Vec::new(),
                     views: 3,
+                    name: img_counter.to_string(),
+                    is_sample: false,
+                    sample_num: 0,
                 };
                 let encoded = serde_json::to_string(&final_message).unwrap();
                 client_send_copy
                     .send_to(encoded.as_bytes(), &src)
                     .expect("Failed to send data to server");
+                img_counter += 1;
             }
             if id == 4 {
                 // reconstruct the image from the chunks
@@ -412,10 +549,13 @@ fn main() {
                 if msg == "MINSENDEND" {
                     println!("Reconstructed image from client: {}", src);
                     // write the image to a file
-                    let filename = format!("reconstructed_image_client_{}.png", client_num);
+                    let filename =
+                        format!("reconstructed_image_client_{}_{}.png", client_num, name);
                     let mut file = File::create(filename.clone()).unwrap();
                     file.write_all(&reconstructed_image_bytes);
                     println!("Reconstructed image from client: {}", src);
+                    // clear the reconstructed image bytes vector
+                    reconstructed_image_bytes.clear();
                     // add to all images recieved
                     let image_info = (filename, views);
                     all_images_recieved.push(image_info);
@@ -488,26 +628,14 @@ fn main() {
                                     id: 5,
                                     image_fragment: Vec::new(),
                                     views: 0,
+                                    name: "".to_string(),
+                                    is_sample: false,
+                                    sample_num: 0,
                                 };
-                                let encoded = serde_json::to_string(&message).unwrap();
-                                println!("Sending number of images to requesting client");
-                                client_send_copy
-                                    .send_to(encoded.as_bytes(), &src)
-                                    .expect("Failed to send data to server");
-                                // recieve the image number from the requesting client
-                                let image_to_send = msg.parse::<usize>().unwrap();
-                                // send the image to the requesting client
-                                let encoded_image = all_encoded_images[image_to_send - 1].clone();
-                                println!("Sending image to requesting client");
-                                let mut encoded_image_chunks = Vec::new();
-                                for chunk in encoded_image.chunks(1024) {
-                                    encoded_image_chunks.push(chunk);
-                                }
-                                // for every
                             }
                             4 => {
                                 // exit
-                                process::exit(0);
+                                break;
                             }
                             _ => {
                                 println!("Invalid choice");
@@ -516,6 +644,7 @@ fn main() {
                     }
                 }
             }
+            if id == 5 {}
         }
     });
 
@@ -555,6 +684,9 @@ fn main() {
             id: id,
             image_fragment: Vec::new(),
             views: 0,
+            name: "".to_string(),
+            is_sample: false,
+            sample_num: 0,
         };
         let encoded = serde_json::to_string(&message).unwrap();
         client_send_socket
@@ -562,166 +694,4 @@ fn main() {
             .expect("Failed to send data to server");
         message_count += 1;
     }
-    // never stop
-    loop {}
-
-    // if client_num == 1 {
-    //     thread::sleep(Duration::from_millis(3000));
-    //     // sleep for 2 seconds to make sure all clients are listening
-    //     println!("Sending image to client 2");
-    //     // send message to clients in directory of service
-    //     for ip in directory_of_service {
-    //         // choose who to send to. For now, send to client 2
-    //         if ip != "127.0.0.5:5555" {
-    //             continue;
-    //         }
-    //         // send the first encoded image to client
-    //         let encoded_image = all_encoded_images[0].clone();
-    //         let mut encoded_image_chunks = Vec::new();
-    //         for chunk in encoded_image.chunks(1024) {
-    //             encoded_image_chunks.push(chunk);
-    //         }
-    //         for j in 0..encoded_image_chunks.len() {
-    //             // send the struct to the server
-    //             let image_fragment = ImageViews {
-    //                 fragment: encoded_image_chunks[j].to_vec(),
-    //                 access_rights: 2,
-    //             };
-
-    //             let encoded = serde_json::to_string(&image_fragment).unwrap();
-
-    //             // send to client 2
-    //             client_send_socket
-    //                 .send_to(encoded.as_bytes(), &ip)
-    //                 .expect("Failed to send data to server");
-
-    //             if j % 20 == 0 && j != 0 {
-    //                 // sleep for 1 second
-    //                 thread::sleep(Duration::from_millis(20));
-    //             }
-    //         }
-    //         // send end to client 2
-    //         let end_message = "MINSENDEND";
-    //         let final_message = ImageViews {
-    //             fragment: end_message.as_bytes().to_vec(),
-    //             access_rights: 2,
-    //         };
-    //         let encoded = serde_json::to_string(&final_message).unwrap();
-    //         client_send_socket
-    //             .send_to(encoded.as_bytes(), &ip)
-    //             .expect("Failed to send data to server");
-    //         // remove the port number from the ip
-    //         let ip = ip.split(":").collect::<Vec<&str>>()[0];
-    //         // add to all images sent
-    //         let image_info = ImageClientInfo {
-    //             access_rights: 2,
-    //             sender_ip: client_ip.to_string(),
-    //             reciever_ip: ip.to_string(),
-    //             // image_data: all_encoded_images[0].clone(),
-    //         };
-    //         all_images_sent.push(image_info);
-    //         println!("Sent image to client 2");
-
-    //         // print the all_images_sent vector
-    //         println!("All images sent:");
-    //         println!("{:?}", all_images_sent);
-    //     }
-    // } else if client_num == 2 {
-    //     // listen for messages from clients
-    //     let mut buffer = [0; 65535];
-    //     let mut recieved_image: Vec<u8> = Vec::new();
-    //     let mut views = 0;
-    //     let mut src_ip;
-    //     loop {
-    //         let (amt, src) = client_listen_socket
-    //             .recv_from(&mut buffer)
-    //             .expect("Didn't receive data");
-    //         let msg = str::from_utf8(&buffer[..amt]).unwrap();
-
-    //         let image_fragment: ImageViews = serde_json::from_str(msg).unwrap();
-    //         let recieved_chunk = image_fragment.fragment;
-    //         let access_rights = image_fragment.access_rights;
-    //         let src = src.ip();
-
-    //         if recieved_chunk == b"MINSENDEND" {
-    //             views = access_rights;
-    //             src_ip = src;
-    //             break;
-    //         }
-    //         recieved_image.append(&mut recieved_chunk.to_vec());
-    //     }
-    //     println!("Received image from client 1");
-    //     // add to all images recieved
-    //     let image_info = ImageClientInfo {
-    //         access_rights: views as i32,
-    //         sender_ip: src_ip.to_string(),
-    //         reciever_ip: client_ip.to_string(),
-    //         // image_data: recieved_image.clone(),
-    //     };
-    //     all_images_recieved.push(image_info);
-    //     let mut File = File::create("recieved_image.png").unwrap();
-    //     File.write_all(&recieved_image);
-
-    //     println!("All images recieved:");
-    //     println!("{:?}", all_images_recieved);
-
-    //     ////////////////////////////////////////////////////
-
-    //     // decode the image view times
-    //     for i in 0..views {
-    //         let encoded_image = file_as_image_buffer("recieved_image.png".to_string());
-    //         let dec = Decoder::new(encoded_image);
-    //         let out_buffer = dec.decode_alpha();
-    //         let clean_buffer: Vec<u8> = out_buffer.into_iter().filter(|b| *b != 0xff_u8).collect();
-    //         let message = bytes_to_str(clean_buffer.as_slice());
-    //         let decoded_image = base64::decode(message).unwrap();
-    //         let path = format!("FINALVIEWS_image_{}_client_{}.png", i, client_num);
-    //         let mut file = File::create(path.clone()).unwrap();
-    //         file.write_all(&decoded_image);
-    //         // open_image(&path);
-    //     }
-    // }
-
-    // if client_num == 1 {
-    //     // loop over the sent images vector and update the access rights of the first image
-    //     for i in 0..all_images_sent.len() {
-    //         if all_images_sent[i].reciever_ip == client_2 {
-    //             all_images_sent[i].access_rights = 1;
-    //             // send to client 2 this updated access rights number
-    //             // add the port number to the ip
-    //             let client_2 = format!("{}:{}", client_2, listening_port);
-    //             client_send_socket
-    //                 .send_to(
-    //                     all_images_sent[i].access_rights.to_string().as_bytes(),
-    //                     &client_2,
-    //                 )
-    //                 .expect("Failed to send data to server");
-    //         }
-    //     }
-    // } else if client_num == 2 {
-    //     // listen for messages from clients
-    //     let mut buffer = [0; 65535];
-    //     let mut recieved_access_rights: Vec<u8> = Vec::new();
-    //     let mut src_ip;
-    //     loop {
-    //         let (amt, src) = client_listen_socket
-    //             .recv_from(&mut buffer)
-    //             .expect("Didn't receive data");
-    //         let msg = str::from_utf8(&buffer[..amt]).unwrap();
-    //         let access_rights = msg.parse::<u8>().unwrap();
-    //         src_ip = src.ip();
-    //         recieved_access_rights.push(access_rights);
-    //         if recieved_access_rights.len() == 1 {
-    //             break;
-    //         }
-    //     }
-    //     // loop over the recieved images vector and update the access rights of the first image
-    //     for i in 0..all_images_recieved.len() {
-    //         if all_images_recieved[i].sender_ip == client_1 {
-    //             all_images_recieved[i].access_rights = recieved_access_rights[0] as i32;
-    //         }
-    //     }
-    //     println!("All images recieved:");
-    //     println!("{:?}", all_images_recieved);
-    // }
 }
