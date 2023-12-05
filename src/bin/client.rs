@@ -567,9 +567,9 @@ fn main() {
                     client_send_copy
                         .send_to(encoded.as_bytes(), &src)
                         .expect("Failed to send data to server");
-                    if j % 15 == 0 && j != 0 {
+                    if j % 10 == 0 && j != 0 {
                         // sleep for 1 second
-                        thread::sleep(Duration::from_millis(30));
+                        thread::sleep(Duration::from_millis(50));
                     }
                 }
                 // send end to the requesting client
