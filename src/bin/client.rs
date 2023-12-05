@@ -87,7 +87,7 @@ fn main() {
         .parse()
         .unwrap();
 
-    let client_1 = "172.20.10.2"; // MINS HP
+    let client_1 = "172.20.10.10"; // MINS HP
     let client_2 = "172.20.10.11"; // SHAALAN HP
     let client_3 = "127.0.0.6";
 
@@ -106,7 +106,7 @@ fn main() {
     let client_send_socket = create_socket(client_ip, sending_port);
     let client_listen_socket = create_socket(client_ip, listening_port);
 
-    let server_1_socket = "172.20.10.15:3333"; // SHAALAN MACBOOK
+    let server_1_socket = "172.20.10.2:3333"; // SHAALAN MACBOOK
     let server_2_socket = "172.20.10.9:3333"; // ZIZO YOGA
     let server_3_socket = "172.20.10.7:3333"; // ZIZO THINKPAD
 
@@ -354,6 +354,8 @@ fn main() {
         let path = format!("decoded_image_{}_client_{}.png", i, client_num);
         let mut file = File::create(path).unwrap();
         file.write_all(&decoded_image);
+        // sleep for 2 seconds
+        thread::sleep(Duration::from_secs(2));
     }
 
     // print directory of service

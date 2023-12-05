@@ -146,7 +146,7 @@ fn election_logic(
         let msg = str::from_utf8(&buffer[..amt]).unwrap();
         let winner_info: ServerInfo = serde_json::from_str(msg).unwrap();
         // println!("Received: {:?} from {}", winner_info, src); //
-        winner = winner_info.servexxxxxr;
+        winner = winner_info.server;
     }
 
     return winner;
@@ -159,7 +159,7 @@ fn main() {
         .parse()
         .unwrap();
 
-    let server_1 = "172.20.10.15"; // SHAALAN MACBOOK
+    let server_1 = "172.20.10.2"; // SHAALAN MACBOOK
     let server_2 = "172.20.10.9"; // ZIZO YOGA
     let server_3 = "172.20.10.7"; // ZIZO THINKPAD
 
