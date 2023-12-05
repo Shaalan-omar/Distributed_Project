@@ -367,12 +367,17 @@ fn main() {
     println!("Number of encoded images: {}", all_encoded_images.len());
 
     // vector of image path and number of views recieved
-    // (image path, views, image number)
-    let mut all_images_recieved: Vec<(String, i32, i32)> = Vec::new();
+    // (image path, views, image number, who sent it)
+    // let mut all_images_recieved: Vec<(String, i32, i32, String)> = Vec::new();
+    let mut all_images_recieved: Arc<Mutex<Vec<(String, i32, i32, String)>>> =
+        Arc::new(Mutex::new(Vec::new()));
+    let all_images_recieved_clone = Arc::clone(&all_images_recieved);
 
     // vector of pairs that has image id and destination ip
     let mut all_images_sent: Arc<Mutex<Vec<(i32, String)>>> = Arc::new(Mutex::new(Vec::new()));
     let all_images_sent_clone = Arc::clone(&all_images_sent);
+    let mut offline_clients: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let offline_clients_clone = Arc::clone(&offline_clients);
 
     //////////////////////////////////////////////////////////////////
 
@@ -382,6 +387,8 @@ fn main() {
 
     let client_listen_copy = client_listen_socket.try_clone().unwrap();
     let client_send_copy = client_send_socket.try_clone().unwrap();
+    let server_send_copy = sending_socket.try_clone().unwrap();
+    let server_listen_copy = recieving_socket.try_clone().unwrap();
     let mut reconstructed_image_bytes: Vec<u8> = Vec::new();
 
     let mut img_counter: u16 = 1;
@@ -581,7 +588,9 @@ fn main() {
                         // clear the reconstructed image bytes vector
                         reconstructed_image_bytes.clear();
                         // add to all images recieved
-                        let image_info = (filename, views, name.parse::<i32>().unwrap());
+                        let image_info =
+                            (filename, views, name.parse::<i32>().unwrap(), src.clone());
+                        let mut all_images_recieved = all_images_recieved_clone.lock().unwrap();
                         all_images_recieved.push(image_info);
                     }
                     go_to_id_4 = false;
@@ -590,13 +599,15 @@ fn main() {
                         // ask the user if they want to view images or request another image or add views
                         println!("1. to view images.");
                         println!("2. to request another image.");
-                        println!("3. to add views to an image.");
+                        println!("3. to renew views of an image.");
                         println!("4. to exit.");
                         let mut choice = String::new();
                         std::io::stdin()
                             .read_line(&mut choice)
                             .expect("Failed to read line");
                         let choice = choice.trim().parse::<u8>().unwrap();
+                        let mut all_images_recieved = all_images_recieved_clone.lock().unwrap();
+
                         match choice {
                             1 => {
                                 // view images
@@ -648,16 +659,46 @@ fn main() {
                             }
                             3 => {
                                 // add views to an image
-                                // send the number of images to the requesting client
+                                // ask the user which image they want to add views to
+                                for i in 0..all_images_recieved.len() {
+                                    println!(
+                                        "{}. {} with views {}",
+                                        i + 1,
+                                        all_images_recieved[i].0,
+                                        all_images_recieved[i].1
+                                    );
+                                }
+                                println!("Enter the number of the image you want to add views to:");
+                                let mut image_to_add_views = String::new();
+                                std::io::stdin()
+                                    .read_line(&mut image_to_add_views)
+                                    .expect("Failed to read line");
+
+                                let image_to_add_views1 =
+                                    image_to_add_views.trim().parse::<usize>().unwrap();
+                                let image_to_add_views1 = image_to_add_views1 - 1;
+                                let image_to_add_views = all_images_recieved[image_to_add_views1].2;
+                                let client_to_send_to_ip = all_images_recieved[image_to_add_views1]
+                                    .3
+                                    .parse::<SocketAddr>()
+                                    .unwrap();
+
                                 let message = MessageType {
-                                    message: "change views".to_string(),
-                                    id: 5,
+                                    message: "".to_string(),
+                                    id: 6,
                                     image_fragment: Vec::new(),
                                     views: 0,
-                                    name: "".to_string(),
+                                    name: image_to_add_views.to_string(),
                                     is_sample: false,
                                     sample_num: 0,
                                 };
+                                let encoded = serde_json::to_string(&message).unwrap();
+                                // this is sent to the address of the client that sent the image
+                                client_send_copy
+                                    .send_to(encoded.as_bytes(), client_to_send_to_ip)
+                                    .expect("Failed to send data to server");
+
+                                break;
                             }
                             4 => {
                                 // exit
@@ -673,6 +714,7 @@ fn main() {
             if id == 5 {
                 let image_to_change_views = name.parse::<i32>().unwrap();
                 let new_views = views;
+                let mut all_images_recieved = all_images_recieved_clone.lock().unwrap();
                 for i in 0..all_images_recieved.len() {
                     if all_images_recieved[i].2 == image_to_change_views {
                         mem::replace(&mut all_images_recieved[i].1, new_views);
@@ -684,25 +726,158 @@ fn main() {
                     }
                 }
             }
+            if id == 6 {
+                println!("Client {} wants to add views to image {}", src, name);
+                println!("1. to approve.");
+                println!("2. to decline.");
+
+                let mut choice = String::new();
+                std::io::stdin()
+                    .read_line(&mut choice)
+                    .expect("Failed to read line");
+                let choice = choice.trim().parse::<u8>().unwrap();
+
+                let message: MessageType;
+                if choice == 1 {
+                    // approve
+                    // send a yes message to the sending client
+                    message = MessageType {
+                        message: "yes".to_string(),
+                        id: 7,
+                        image_fragment: Vec::new(),
+                        views: 3,
+                        name: name.clone(),
+                        is_sample: false,
+                        sample_num: 0,
+                    };
+                } else {
+                    // decline
+                    message = MessageType {
+                        message: "no".to_string(),
+                        id: 7,
+                        image_fragment: Vec::new(),
+                        views: 0,
+                        name: name.clone(),
+                        is_sample: false,
+                        sample_num: 0,
+                    };
+                }
+
+                tx_clone.send("change views".to_string()).unwrap();
+
+                println!("Sending message to client: {}", src);
+                println!("Message: {}", message.message);
+
+                let encoded = serde_json::to_string(&message).unwrap();
+                // this is sent to the address of the client that sent the image
+                client_send_copy
+                    .send_to(encoded.as_bytes(), &src)
+                    .expect("Failed to send data to server");
+            }
+            if id == 7 {
+                if msg == "yes" {
+                    // add views to the image
+                    let image_to_change_views = name.parse::<i32>().unwrap();
+                    let new_views = views;
+                    let mut all_images_recieved = all_images_recieved_clone.lock().unwrap();
+                    for i in 0..all_images_recieved.len() {
+                        if all_images_recieved[i].2 == image_to_change_views {
+                            mem::replace(&mut all_images_recieved[i].1, new_views);
+                            println!("Changed views of image: {}", image_to_change_views);
+                            println!("New views: {}", all_images_recieved[i].1);
+                            // go to id=4
+                            println!("changed views");
+                        }
+                    }
+                } else {
+                    println!("Client {} declined to add views to image {}", src, name);
+                }
+                go_to_id_4 = true;
+            }
+            if id == 8 {
+                // send to server that the src client is offline
+                let offline_message = "OFFLINE";
+                // add the offline client to the vector of offline clients
+                let mut offline_clients = offline_clients_clone.lock().unwrap();
+                offline_clients.push(src.clone());
+
+                let mut src_to_send = src.clone();
+                // remove the port number
+                src_to_send.truncate(src_to_send.len() - 5);
+                // add the port number 9999
+                src_to_send = format!("{}:{}", src_to_send, 9999);
+
+                // send to server offline message and with it the IP and PORT of client that went offline
+
+                let message = MessageType {
+                    message: src_to_send.clone(),
+                    id: 111,
+                    image_fragment: Vec::new(),
+                    views: 0,
+                    name: "".to_string(),
+                    is_sample: false,
+                    sample_num: 0,
+                };
+
+                let encoded = serde_json::to_string(&message).unwrap();
+                // this is sent to the address of the client that sent the image
+                server_send_copy
+                    .send_to(encoded.as_bytes(), &server_1_socket)
+                    .expect("Failed to send data to server");
+                server_send_copy
+                    .send_to(encoded.as_bytes(), &server_2_socket)
+                    .expect("Failed to send data to server");
+                server_send_copy
+                    .send_to(encoded.as_bytes(), &server_3_socket)
+                    .expect("Failed to send data to server");
+            }
+            if id == 9 {
+                // remove from the offline clients vector
+                let mut offline_clients = offline_clients_clone.lock().unwrap();
+                for i in 0..offline_clients.len() {
+                    if offline_clients[i] == src {
+                        offline_clients.remove(i);
+                        println!("Client {} is back online", src);
+                        break;
+                    }
+                }
+            }
         }
     });
 
     let mut message_count = 0;
+    let mut hold_input = false;
+    let mut go_online = false;
+    let mut skipthis = false;
 
     loop {
         // MAIN THREAD
-        if message_count != 0 {
-            // recieve from channel
-            let recieved = rx.recv().unwrap();
-            if recieved != "request image" {
-                continue;
+        if go_online == false {
+            if hold_input == true {
+                // recieve from channel
+                let recieved = rx.recv().unwrap();
+                hold_input = false;
+            } else if message_count != 0 {
+                // recieve from channel
+                if skipthis == false {
+                    let recieved = rx.recv().unwrap();
+                    if recieved != "request image" {
+                        continue;
+                    }
+                }
             }
         }
+        skipthis = false;
+        if go_online == true {
+            println!("5. Simulate going online.");
+        } else {
+            // do u want to send to client or change views of a sent image
+            println!("1. Request from client.");
+            println!("2. Change views of a sent image.");
+            println!("3. Accept remote changing of views.");
+            println!("4. Simulate going offline.");
+        }
 
-        // do u want to send to client or change views of a sent image
-        println!("1. Request from client.");
-        println!("2. Change views of a sent image.");
-        println!("3. Exit.");
         let mut choice = String::new();
         std::io::stdin()
             .read_line(&mut choice)
@@ -777,8 +952,16 @@ fn main() {
                     .expect("Failed to read line");
                 let new_views = new_views.trim().parse::<i32>().unwrap();
                 // send the number of images to the requesting client
+                // get the src of the client from the all_images_sent vector
+                let x = all_images_sent[input_choice - 1].1.clone();
+                // remove the port number and 9999
+                let mut x_clone = x.clone();
+                x_clone.truncate(x_clone.len() - 5);
+                // add the port number 9999
+                x_clone = format!("{}:{}", x_clone, 9999);
+
                 let message = MessageType {
-                    message: "".to_string(),
+                    message: x_clone.clone(),
                     id: 5,
                     image_fragment: Vec::new(),
                     views: new_views,                        // new views
@@ -788,13 +971,146 @@ fn main() {
                 };
                 let encoded = serde_json::to_string(&message).unwrap();
                 // this is sent to the address of the client that sent the image
-                client_send_socket
-                    .send_to(encoded.as_bytes(), &all_images_sent[input_choice - 1].1)
-                    .expect("Failed to send data to server");
+
+                // if this IP is not in the offline clients vector, send the message
+                let mut offline_clients = offline_clients.lock().unwrap();
+                for ip in offline_clients.clone() {
+                    if ip == all_images_sent[input_choice - 1].1 {
+                        // send to server with id=222
+                        sending_socket
+                            .send_to(encoded.as_bytes(), &server_1_socket)
+                            .expect("Failed to send data to server");
+                        sending_socket
+                            .send_to(encoded.as_bytes(), &server_2_socket)
+                            .expect("Failed to send data to server");
+                        sending_socket
+                            .send_to(encoded.as_bytes(), &server_3_socket)
+                            .expect("Failed to send data to server");
+                    } else {
+                        client_send_socket
+                            .send_to(encoded.as_bytes(), &all_images_sent[input_choice - 1].1)
+                            .expect("Failed to send data to server");
+                    }
+                }
+                message_count += 1;
             }
             3 => {
-                // exit
-                break;
+                hold_input = true;
+            }
+            4 => {
+                // send to all clients in DOS offline message
+                let offline_message = "OFFLINE";
+                let id = 8;
+                let message = MessageType {
+                    message: offline_message.to_string(),
+                    id: id,
+                    image_fragment: Vec::new(),
+                    views: 0,
+                    name: "".to_string(),
+                    is_sample: false,
+                    sample_num: 0,
+                };
+                let encoded = serde_json::to_string(&message).unwrap();
+                for ip in directory_of_service.clone() {
+                    client_send_socket
+                        .send_to(encoded.as_bytes(), &ip)
+                        .expect("Failed to send data to server");
+                }
+
+                println!("OFFLINE");
+                go_online = true;
+            }
+            5 => {
+                // send to server that the src client is online
+                // send to clients message with id = 9 to remove the src client from their offline clients vector
+                let online_message = "ONLINE";
+                let id = 9;
+                let message = MessageType {
+                    message: online_message.to_string(),
+                    id: id,
+                    image_fragment: Vec::new(),
+                    views: 0,
+                    name: "".to_string(),
+                    is_sample: false,
+                    sample_num: 0,
+                };
+                let encoded = serde_json::to_string(&message).unwrap();
+                for ip in directory_of_service.clone() {
+                    client_send_socket
+                        .send_to(encoded.as_bytes(), &ip)
+                        .expect("Failed to send data to server");
+                }
+
+                // send to server
+                let message_src = client_ip.clone();
+                // add the port number 9999
+                let message_src = format!("{}:{}", message_src, 9999);
+                let message = MessageType {
+                    message: message_src.clone(),
+                    id: 222,
+                    image_fragment: Vec::new(),
+                    views: 0,
+                    name: "".to_string(),
+                    is_sample: false,
+                    sample_num: 0,
+                };
+                let encoded = serde_json::to_string(&message).unwrap();
+                sending_socket
+                    .send_to(encoded.as_bytes(), &server_1_socket)
+                    .expect("Failed to send data to server");
+                sending_socket
+                    .send_to(encoded.as_bytes(), &server_2_socket)
+                    .expect("Failed to send data to server");
+                sending_socket
+                    .send_to(encoded.as_bytes(), &server_3_socket)
+                    .expect("Failed to send data to server");
+                println!("SENT");
+                go_online = false;
+                loop {
+                    // wait for reply from server
+                    println!("LOOP");
+                    let mut buffer = [0; 65535];
+                    let (amt, src) = recieving_socket
+                        .recv_from(&mut buffer)
+                        .expect("Didn't receive data");
+                    let msg = str::from_utf8(&buffer[..amt]).unwrap();
+                    let message: MessageType = serde_json::from_str(msg).unwrap();
+                    let recieved_message = message.message;
+                    let recieved_id = message.id;
+                    let name = message.name;
+                    let new_views = message.views;
+                    // clean the recieved id and parse it into i32
+                    let recieved_id = recieved_id.to_string();
+                    let recieved_id = recieved_id.parse::<i32>().unwrap();
+
+                    println!("RECIEVED");
+                    println!("RECIEVED MESSAGE: {}", recieved_message);
+                    println!("RECIEVED ID: {}", recieved_id);
+                    let mut all_images_recieved = all_images_recieved.lock().unwrap();
+                    let mut yessir: bool = false;
+                    if recieved_id == 10 {
+                        // change the views of the image in the all images recieved vector using the name
+                        let name = name.parse::<i32>().unwrap();
+                        for i in 0..all_images_recieved.len() {
+                            // check if the name is the same
+                            if all_images_recieved[i].2 == name {
+                                // change the views
+                                all_images_recieved[i].1 = new_views;
+                                println!("Changed views of image: {}", name);
+                                println!("New views: {}", all_images_recieved[i].1);
+                                // go to id=4
+                                println!("changed views");
+                                yessir = true;
+                                break;
+                            }
+                        }
+                    }
+                    if yessir == true {
+                        message_count += 1;
+                        skipthis = true;
+                        break;
+                    }
+                }
             }
             _ => {
                 println!("Invalid choice");

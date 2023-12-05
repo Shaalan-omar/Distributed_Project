@@ -33,6 +33,17 @@ struct ImageFragment {
     request_type: u8,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct MessageType {
+    message: String,
+    id: u8,
+    image_fragment: Vec<u8>,
+    views: i32,
+    name: String,
+    is_sample: bool,
+    sample_num: u8,
+}
+
 fn create_socket(server_ip: &str, port: u16) -> UdpSocket {
     let server_address = format!("{}:{}", server_ip, port);
     let socket_addr: SocketAddr = server_address
@@ -227,6 +238,11 @@ fn main() {
     /////////////////////////////////////////////////////////////////
     /// thread to receive image data from clients
     let client_ips_arc = Arc::clone(&client_ips);
+
+    // vector of message type to store the messages with mutex lock
+    let offline_clients: Arc<Mutex<Vec<MessageType>>> = Arc::new(Mutex::new(Vec::new()));
+    let offline_clients_arc = Arc::clone(&offline_clients);
+
     thread::spawn(move || {
         let mut buffer = [0; 65535];
         let mut src_client;
@@ -244,38 +260,98 @@ fn main() {
             }
 
             let sending_client = src.to_string();
-
-            // take the fragment and deserialize it into an ImageFragment struct
             let msg = str::from_utf8(&buffer[..amt]).unwrap();
-            let image_fragment: ImageFragment = serde_json::from_str(msg).unwrap();
-            // the chunk and the request type that will be used to differentiate between requests.
-            let recieved_chunk = &image_fragment.fragment;
-            let request_type = image_fragment.request_type;
 
-            // if the request type is directory, send to main process ip_dirrr and continue
-            if request_type == request_type_directory {
-                src_client = src.to_string();
-                src_client.push_str("_dirrr");
-                tx_clone.send(src_client).unwrap();
-                continue;
-            }
+            // try deserializing into messageType, if that fails, then continue with code normally
+            let message_type_result: Result<MessageType, _> = serde_json::from_str(msg);
+            match message_type_result {
+                Ok(message) => {
+                    println!("THIS IS MESSAGE TYPE");
+                    println!("Received: {:?} from {}", message, src);
+                    // check if the message has offline, if so, add to the vector of messages
+                    if message.id == 111 {
+                        // add the message to the vector of messages
+                        println!("THIS IS OFFLINE MESSAGE");
+                        let mut client_messages_lock = offline_clients_arc.lock().unwrap();
+                        // make sure that this is the only offline message from the client
+                        let mut flag = true;
+                        for i in 0..client_messages_lock.len() {
+                            if client_messages_lock[i].message == message.message {
+                                flag = false;
+                                break;
+                            }
+                        }
+                        if flag {
+                            client_messages_lock.push(message);
+                        }
+                        continue;
+                    }
+                    // send to the client stored before the online message
+                    if message.id == 5 {
+                        // loop over the vector of messages and find the message with the same ip as the message
+                        // set the number of views to the one in the message, and the name to the one in the message
+                        let mut client_messages_lock = offline_clients_arc.lock().unwrap();
+                        for i in 0..client_messages_lock.len() {
+                            if client_messages_lock[i].message == message.message {
+                                client_messages_lock[i].name = message.name;
+                                client_messages_lock[i].views = message.views;
+                                println!("THIS IS ONLINE MESSAGE");
+                                break;
+                            }
+                        }
+                        continue;
+                    }
 
-            if recieved_chunk == b"MINSENDEND" {
-                // println!("Finished receiving image from client: {}", src.to_string());
-                src_client = src.to_string();
-                tx_clone.send(src_client).unwrap();
-                continue;
-            }
-            // add the fragment to the hashmap if client already sent, else create a new entry
-            if data_arc.lock().unwrap().contains_key(&sending_client) {
-                let mut x = data_arc.lock().unwrap();
-                let mut temp = x.get_mut(&sending_client).unwrap();
-                temp.append(&mut recieved_chunk.to_vec());
-            } else {
-                data_arc
-                    .lock()
-                    .unwrap()
-                    .insert(sending_client, recieved_chunk.to_vec());
+                    if message.id == 222 {
+                        println!("THIS IS NEW ONLINE MESSAGE");
+                        println!("Received: {:?} from {}", message, src);
+                        // check for src with port 9999 is in the vector of messages
+                        let mut src_x = src.to_string();
+                        src_x.truncate(src_x.len() - 5);
+                        src_x.push_str(":9999");
+                        let mut client_messages_lock = offline_clients_arc.lock().unwrap();
+                        for i in 0..client_messages_lock.len() {
+                            if client_messages_lock[i].message == src_x {
+                                let msg = "update:".to_string() + i.to_string().as_str();
+                                tx_clone.send(msg).unwrap();
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    // println!("THIS IS NOT MESSAGE TYPE");
+                    let image_fragment: ImageFragment = serde_json::from_str(msg).unwrap();
+                    // the chunk and the request type that will be used to differentiate between requests.
+                    let recieved_chunk = &image_fragment.fragment;
+                    let request_type = image_fragment.request_type;
+
+                    // if the request type is directory, send to main process ip_dirrr and continue
+                    if request_type == request_type_directory {
+                        src_client = src.to_string();
+                        src_client.push_str("_dirrr");
+                        tx_clone.send(src_client).unwrap();
+                        continue;
+                    }
+
+                    if recieved_chunk == b"MINSENDEND" {
+                        // println!("Finished receiving image from client: {}", src.to_string());
+                        src_client = src.to_string();
+                        tx_clone.send(src_client).unwrap();
+                        continue;
+                    }
+                    // add the fragment to the hashmap if client already sent, else create a new entry
+                    if data_arc.lock().unwrap().contains_key(&sending_client) {
+                        let mut x = data_arc.lock().unwrap();
+                        let mut temp = x.get_mut(&sending_client).unwrap();
+                        temp.append(&mut recieved_chunk.to_vec());
+                    } else {
+                        data_arc
+                            .lock()
+                            .unwrap()
+                            .insert(sending_client, recieved_chunk.to_vec());
+                    }
+                }
             }
         }
     });
@@ -310,6 +386,45 @@ fn main() {
 
         //vector of bytes to store the image
         let mut src_client = rx.recv().unwrap();
+
+        if src_client.contains("update") {
+            let mut client_messages_lock = offline_clients.lock().unwrap();
+            let mut index = src_client.split(":").collect::<Vec<&str>>()[1].to_string();
+            let index = index.parse::<usize>().unwrap();
+            let message = MessageType {
+                message: client_messages_lock[index].message.clone(),
+                id: 10,
+                image_fragment: client_messages_lock[index].image_fragment.clone(),
+                views: client_messages_lock[index].views,
+                name: client_messages_lock[index].name.clone(),
+                is_sample: client_messages_lock[index].is_sample,
+                sample_num: client_messages_lock[index].sample_num,
+            };
+            let encoded = serde_json::to_string(&message).unwrap();
+            if server_num == leader {
+                println!(
+                    "----- SENDING ONLINE MESSAGE TO CLIENT WITH IP: {} -----",
+                    message.message
+                );
+                socket4
+                    .send_to(encoded.as_bytes(), &message.message)
+                    .expect("Failed to send data to client");
+                client_messages_lock.remove(index);
+            }
+            message_counter += 1;
+            election_starter = leader;
+            if (mem_usage >= 1000.0) {
+                let flag: bool = (message_counter != die_message_counter + 1)
+                    && (message_counter != die_message_counter + 2)
+                    && (message_counter != die_message_counter + 3);
+                if (message_counter % 4 == 0) && (message_counter != 0) && flag {
+                    println!("----- RELOADING THIS SERVER -----");
+                    // change the memory usage of a random server
+                    mem_usage -= 1000.0;
+                }
+            }
+            continue;
+        }
 
         // if the src_client has _dirrr, then it is a directory request
         if src_client.contains("_dirrr") {
