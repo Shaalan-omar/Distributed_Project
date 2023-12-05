@@ -106,9 +106,9 @@ fn main() {
     let client_send_socket = create_socket(client_ip, sending_port);
     let client_listen_socket = create_socket(client_ip, listening_port);
 
-    let server_1_socket = "127.0.0.1:3333"; // SHAALAN MACBOOK
-    let server_2_socket = "127.0.0.2:3333"; // ZIZO YOGA
-    let server_3_socket = "127.0.0.3:3333"; // ZIZO THINKPAD
+    let server_1_socket = "172.20.10.15:3333"; // SHAALAN MACBOOK
+    let server_2_socket = "172.20.10.9:3333"; // ZIZO YOGA
+    let server_3_socket = "172.20.10.7:3333"; // ZIZO THINKPAD
 
     // client sends to server on port 3333
     // client receives from server on port 9999
