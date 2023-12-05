@@ -87,8 +87,8 @@ fn main() {
         .parse()
         .unwrap();
 
-    let client_1 = "127.0.0.4"; // MINS HP
-    let client_2 = "127.0.0.5"; // SHAALAN HP
+    let client_1 = "192.168.1.2"; // MINS HP
+    let client_2 = "192.168.1.6"; // SHAALAN HP
     let client_3 = "127.0.0.6";
 
     let clients = vec![client_1, client_2, client_3];
@@ -106,9 +106,9 @@ fn main() {
     let client_send_socket = create_socket(client_ip, sending_port);
     let client_listen_socket = create_socket(client_ip, listening_port);
 
-    let server_1_socket = "127.0.0.1:3333"; // SHAALAN MACBOOK
-    let server_2_socket = "127.0.0.2:3333"; // ZIZO YOGA
-    let server_3_socket = "127.0.0.3:3333"; // ZIZO THINKPAD
+    let server_1_socket = "192.168.1.3:3333"; // SHAALAN MACBOOK
+    let server_2_socket = "192.168.1.4:3333"; // ZIZO YOGA
+    let server_3_socket = "192.168.1.5:3333"; // ZIZO THINKPAD
 
     // client sends to server on port 3333
     // client receives from server on port 9999
@@ -367,17 +367,25 @@ fn main() {
     }
     // print number of images
 
-    let filename = format!("C:/Users/demim/OneDrive/Desktop/Uni/Fall 2023/Fundamentals of Distributed Systems/proj/Distributed_Project/encoded_image_1_client_{}.png", client_num);
-    let mut file = File::open(filename).unwrap();
-    let mut file_bytes = Vec::new();
-    file.read_to_end(&mut file_bytes).unwrap();
-    all_encoded_images.push(file_bytes);
-    let filename = format!("C:/Users/demim/OneDrive/Desktop/Uni/Fall 2023/Fundamentals of Distributed Systems/proj/Distributed_Project/encoded_image_2_client_{}.png", client_num);
-    let mut file = File::open(filename).unwrap();
-    let mut file_bytes = Vec::new();
-    file.read_to_end(&mut file_bytes).unwrap();
-    all_encoded_images.push(file_bytes);
-    println!("Number of encoded images: {}", all_encoded_images.len());
+    // let filename = format!("C:/Users/demim/OneDrive/Desktop/Uni/Fall 2023/Fundamentals of Distributed Systems/proj/Distributed_Project/encoded_image_1_client_{}.png", client_num);
+    // let mut file = File::open(filename).unwrap();
+    // let mut file_bytes = Vec::new();
+    // file.read_to_end(&mut file_bytes).unwrap();
+    // all_encoded_images.push(file_bytes);
+    // let filename = format!("C:/Users/demim/OneDrive/Desktop/Uni/Fall 2023/Fundamentals of Distributed Systems/proj/Distributed_Project/encoded_image_2_client_{}.png", client_num);
+    // let mut file = File::open(filename).unwrap();
+    // let mut file_bytes = Vec::new();
+    // file.read_to_end(&mut file_bytes).unwrap();
+    // all_encoded_images.push(file_bytes);
+    // println!("Number of encoded images: {}", all_encoded_images.len());
+
+    for i in 1..3 {
+        let filename = format!("encoded_image_{}_client_{}.png", i, client_num);
+        let mut file = File::open(filename).unwrap();
+        let mut file_bytes = Vec::new();
+        file.read_to_end(&mut file_bytes);
+        all_encoded_images.push(file_bytes);
+    }
 
     // vector of image path and number of views recieved
     // (image path, views, image number, who sent it)
