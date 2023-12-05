@@ -87,8 +87,8 @@ fn main() {
         .parse()
         .unwrap();
 
-    let client_1 = "127.0.0.4";
-    let client_2 = "127.0.0.5";
+    let client_1 = "172.20.10.2"; // MINS HP
+    let client_2 = "172.20.10.11"; // SHAALAN HP
     let client_3 = "127.0.0.6";
 
     let clients = vec![client_1, client_2, client_3];
@@ -106,9 +106,9 @@ fn main() {
     let client_send_socket = create_socket(client_ip, sending_port);
     let client_listen_socket = create_socket(client_ip, listening_port);
 
-    let server_1_socket = "127.0.0.1:3333";
-    let server_2_socket = "127.0.0.2:3333";
-    let server_3_socket = "127.0.0.3:3333";
+    let server_1_socket = "127.0.0.1:3333"; // SHAALAN MACBOOK
+    let server_2_socket = "127.0.0.2:3333"; // ZIZO YOGA
+    let server_3_socket = "127.0.0.3:3333"; // ZIZO THINKPAD
 
     // client sends to server on port 3333
     // client receives from server on port 9999
