@@ -159,7 +159,7 @@ fn main() {
         .parse()
         .unwrap();
 
-    let server_1 = "192.168.1.3"; // SHAALAN MACBOOK
+    let server_1 = "192.168.1.6"; // SHAALAN MACBOOK
     let server_2 = "192.168.1.4"; // ZIZO YOGA
     let server_3 = "192.168.1.5"; // ZIZO THINKPAD
 

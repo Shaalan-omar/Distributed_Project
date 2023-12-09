@@ -88,8 +88,8 @@ fn main() {
         .unwrap();
 
     let client_1 = "192.168.1.2"; // MINS HP
-    let client_2 = "192.168.1.6"; // SHAALAN HP
-    let client_3 = "127.0.0.6";
+    let client_2 = "192.168.1.3"; // SHAALAN HP
+    let client_3 = "192.168.1.9"; // SHAALAN lenovo
 
     let clients = vec![client_1, client_2, client_3];
 
@@ -106,7 +106,7 @@ fn main() {
     let client_send_socket = create_socket(client_ip, sending_port);
     let client_listen_socket = create_socket(client_ip, listening_port);
 
-    let server_1_socket = "192.168.1.3:3333"; // SHAALAN MACBOOK
+    let server_1_socket = "192.168.1.6:3333"; // SHAALAN MACBOOK
     let server_2_socket = "192.168.1.4:3333"; // ZIZO YOGA
     let server_3_socket = "192.168.1.5:3333"; // ZIZO THINKPAD
 
@@ -601,8 +601,10 @@ fn main() {
                     if (go_to_id_4 == false) {
                         println!("Reconstructed image from client: {}", src);
                         // write the image to a file
-                        let filename =
-                            format!("reconstructed_image_client_{}_{}.png", client_num, name);
+                        let filename = format!(
+                            "reconstructed_image_client_{}_{}_{}.png",
+                            client_num, name, src
+                        );
                         let mut file = File::create(filename.clone()).unwrap();
                         file.write_all(&reconstructed_image_bytes);
                         println!("Reconstructed image from client: {}", src);
